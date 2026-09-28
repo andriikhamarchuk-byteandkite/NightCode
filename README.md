@@ -12,7 +12,7 @@ Sections from the video, with source timestamps and time budgets (38h total):
 | #  | Section                           | Timestamp | Budget | Status  |
 |----|-----------------------------------|-----------|--------|---------|
 | 0  | Project Setup & Components        | 0:07:38   | —      | review  |
-| 1  | UI Infrastructure                 | 1:16:14   | 4h     | todo    |
+| 1  | UI Infrastructure                 | 1:16:14   | 4h     | review  |
 | 2  | Routing & Screen Layout           | 2:51:25   | 3h     | todo    |
 | 3  | Server, Shared Package & Database | 3:25:56   | 5h     | todo    |
 | 4  | Sentry Monitoring                 | 5:08:06   | 1h     | todo    |
@@ -59,13 +59,29 @@ bun run --cwd packages/cli typecheck
 packages/
 └── cli/                          # OpenTUI + React terminal client
     └── src/
-        ├── index.tsx             # Renderer bootstrap and root App
+        ├── index.tsx             # Renderer bootstrap, provider tree, root App
+        ├── theme.ts              # Color theme palettes (Nightfox default)
+        ├── providers/
+        │   ├── theme/            # Current theme + persistence
+        │   ├── keyboard-layer/   # Layer stack: only the top layer handles keys; Ctrl+C responders
+        │   ├── dialog/           # Modal dialog overlay (open/close, Esc, click outside)
+        │   └── toast/            # Temporary notifications (top-right)
         └── components/
             ├── header.tsx        # ASCII "NightCode" logo
             ├── input-bar.tsx     # Prompt textarea, submit handling
             ├── status-bar.tsx    # Mode and model indicator
+            ├── dialog-search-list.tsx  # Generic searchable list used inside dialogs
+            ├── dialogs/          # Dialog contents (theme picker)
             └── command-menu/     # Slash-command menu (/new, /models, /exit, ...)
 ```
+
+## Usage
+
+- Type `/` to open the command menu; navigate with ↑/↓, run with Enter or mouse click, close with Esc.
+- `/theme` opens the theme picker: arrows preview a theme, Enter saves it, Esc reverts.
+- `Ctrl+C` closes the top layer first (dialog, command menu), then clears the input, then exits.
+
+The selected theme is saved to `~/.nightcode/preferences.json`.
 
 ## Scripts
 
@@ -82,7 +98,8 @@ packages/
 
 ## Known limitations
 
-- Only `/exit` is functional; other slash commands insert their text into the input for now.
+- Only `/exit` and `/theme` are functional; `/agents` and `/models` open placeholder dialogs, the rest show placeholder toasts.
+- Theme preview also writes `~/.nightcode/preferences.json` on every highlighted theme (reverted on Esc).
 - Submitting a prompt does nothing yet — the AI backend arrives in later sections.
 - The status bar shows a hard-coded mode and model.
 - Dependencies are newer than in the video (`@opentui/*` 0.5.x vs 0.1.x), so some APIs may differ from the recording.
