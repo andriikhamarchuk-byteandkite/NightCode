@@ -79,6 +79,7 @@ packages/
 - `main` is protected by convention: no direct pushes of unreviewed work.
 - Every working day: one runnable increment on a feature branch, PR with test/run evidence, peer review, then merge.
 - Branch naming: `<clickup-task-id>-<short-description>`.
+- PR descriptions follow [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
 
 ## Known limitations
 
