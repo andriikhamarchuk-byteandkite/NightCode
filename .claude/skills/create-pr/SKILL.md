@@ -25,13 +25,13 @@ Project facts (see `README.md`):
 4. **Checks.** Run `bun run --cwd packages/cli typecheck` (plus `typecheck` of any other touched package). Run `bun run dev:cli` briefly to confirm it starts, then stop it. Record the actual results.
 5. **Draft.**
    - Title: `[<task-id>] <task name>`. For `project-setup`, use a Conventional Commits title (`chore: ...`).
-   - Body: read `.github/PULL_REQUEST_TEMPLATE.md` and fill it. Keep every heading and replace each HTML comment with visible text (comments do not render on GitHub). For `project-setup`, Ticket is `No ticket (section 0: Project Setup)`. Remove "Deviations from video" if the diff (code or dependency versions) has none. Tick a verification box only for a check you ran and that passed. Run evidence: plain-text `TODO: attach screenshot` unless the user gave you one; terminal output does not count as evidence.
+   - Body: read `.github/PULL_REQUEST_TEMPLATE.md` and fill it. Keep every heading and replace each HTML comment with visible text (comments do not render on GitHub). For `project-setup`, Ticket is `No ticket (section 0: Project Setup)`. Remove "Deviations from video" if the diff (code or dependency versions) has none. Tick a verification box only for a check you ran and that passed. Run evidence: a screenshot or recording the user gave you; terminal output does not count as evidence. If there is none, ask the user for it and do not open the PR (step 6) until they provide it.
    - Print title and body in the chat. If the user asked only for a description, stop here.
 6. **Open the PR.**
    - `gh pr list --head <branch>`. If a PR exists, do not create another; offer to update its body with `gh pr edit <number> --body-file <file>`.
    - Write the body to a file in the scratchpad directory (avoids shell quoting issues), then `git push -u origin HEAD` and `gh pr create --base main --title "<title>" --body-file <file>`.
 7. **Update ticket.** If the task status is `IN PROGRESS`, set it to `IN REVIEW` with `mcp__clickup__clickup_update_task`. Add a comment with the PR link via `mcp__clickup__clickup_create_task_comment`.
-8. **Report.** PR link, ticket status change, and a reminder to attach run evidence if it is still `TODO`.
+8. **Report.** PR link and ticket status change.
 
 ## Rules
 
