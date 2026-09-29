@@ -4,15 +4,13 @@
   "workspaces": {
     "": {
       "name": "nightcode",
-      "dependencies": {
-        "opentui-spinner": "^0.0.7",
-      },
     },
     "packages/cli": {
       "name": "@nightcode/cli",
       "dependencies": {
         "@opentui/core": "^0.5.12",
         "@opentui/react": "^0.5.12",
+        "opentui-spinner": "^0.0.7",
         "react": "^19.2.8",
         "react-router": "^8.4.0",
       },

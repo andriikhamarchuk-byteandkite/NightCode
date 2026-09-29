@@ -6,8 +6,5 @@
   ],
   "scripts": {
     "dev:cli": "bun run --watch packages/cli/src/index.tsx"
-  },
-  "dependencies": {
-    "opentui-spinner": "^0.0.7"
   }
 }
