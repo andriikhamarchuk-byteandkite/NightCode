@@ -8,16 +8,20 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@nightcode/server": "workspace:*",
     "@types/bun": "1.3.14",
     "@types/react": "^19.3.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@nightcode/shared": "workspace:*",
     "@opentui/core": "^0.5.12",
     "@opentui/react": "^0.5.12",
+    "hono": "^4.13.11",
     "opentui-spinner": "^0.0.7",
     "react": "^19.2.8",
-    "react-router": "^8.4.0"
+    "react-router": "^8.4.0",
+    "zod": "^4.6.5"
   },
   "engines": {
     "bun": ">=1.3.0"
