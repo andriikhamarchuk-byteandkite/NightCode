@@ -7,6 +7,15 @@ import { UserMessage, BotMessage, ErrorMessage } from "../components/messages";
 import { useToast } from "../providers/toast";
 import { apiClient } from "../lib/api-client";
 import { getErrorMessage } from "../lib/http-errors";
+import { MessageStatus } from "@nightcode/database/enums";
+import {
+  DEFAULT_CHAT_MODEL_ID,
+  type SupportedChatModelId,
+} from "@nightcode/shared";
+import prettyMs from "pretty-ms";
+import { useChat, type Message } from "../hooks/use-chat";
+import { useKeyboardLayer } from "../providers/keyboard-layer";
+import { useKeyboard } from "@opentui/react";
 
 type SessionData = InferResponseType<
   (typeof apiClient.sessions)[":id"]["$get"],
@@ -19,16 +28,104 @@ const sessionLocationSchema = z.object({
   ),
 });
 
-function ChatMessage({ msg }: { msg: SessionData["messages"][number] }) {
-  if (msg.role === "USER") {
+function mapDbMessages(dbMessages: SessionData["messages"]): Message[] {
+  return dbMessages.map((m): Message => {
+    if (m.role === "ERROR") {
+      return { id: m.id, role: "error", content: m.content };
+    }
+
+    if (m.role === "USER") {
+      return {
+        id: m.id,
+        role: "user",
+        content: m.content,
+        mode: m.mode,
+        model: m.model as SupportedChatModelId,
+      };
+    }
+
+    return {
+      id: m.id,
+      role: "assistant",
+      content: m.content,
+      model: m.model as SupportedChatModelId,
+      mode: m.mode,
+      parts: [{ type: "text", text: m.content }],
+      ...(m.duration != null ? { duration: prettyMs(m.duration * 1000) } : {}),
+      interrupted: m.status === MessageStatus.INTERRUPTED,
+    };
+  });
+}
+
+function SessionChat({ session }: { session: SessionData }) {
+  const [initialMessages] = useState(() => mapDbMessages(session.messages));
+  const { isTopLayer } = useKeyboardLayer();
+  const { messages, streaming, submit, abort, interrupt } = useChat(
+    session.id,
+    initialMessages,
+  );
+
+  useEffect(() => {
+    return () => abort();
+  }, [abort]);
+
+  useKeyboard((key) => {
+    if (
+      key.name === "escape" &&
+      isTopLayer("base") &&
+      streaming.status === "streaming"
+    ) {
+      key.preventDefault();
+      interrupt();
+    }
+  });
+
+  return (
+    <SessionShell
+      onSubmit={(text) =>
+        submit({ userText: text, mode: "BUILD", model: DEFAULT_CHAT_MODEL_ID })
+      }
+      inputDisabled={streaming.status === "streaming"}
+      loading={streaming.status === "streaming"}
+      interruptible={streaming.status === "streaming"}
+    >
+      {messages.map((msg) => (
+        <ChatMessage key={msg.id} msg={msg} />
+      ))}
+      {streaming.status === "streaming" && streaming.parts.length > 0 && (
+        <BotMessage
+          parts={streaming.parts}
+          model={streaming.model}
+          mode={streaming.mode}
+          streaming
+        />
+      )}
+    </SessionShell>
+  );
+}
+
+function ChatMessage({ msg }: { msg: Message }) {
+  if (msg.role === "user") {
     return <UserMessage message={msg.content} />;
   }
 
-  if (msg.role === "ERROR") {
+  if (msg.role === "error") {
     return <ErrorMessage message={msg.content} />;
   }
 
-  return <BotMessage content={msg.content} model={msg.model} />;
+  // Interrupted before the first token: kept in history, nothing to show.
+  if (msg.interrupted && msg.content.length === 0) return null;
+
+  return (
+    <BotMessage
+      parts={msg.parts}
+      model={msg.model}
+      mode={msg.mode}
+      duration={msg.duration}
+      streaming={false}
+      interrupted={msg.interrupted}
+    />
+  );
 }
 
 export function Session() {
@@ -51,7 +148,7 @@ export function Session() {
     }
 
     setSession(null);
-    
+
     if (!id) return;
 
     let ignore = false;
@@ -85,11 +182,5 @@ export function Session() {
     return <SessionShell onSubmit={() => {}} inputDisabled loading />;
   }
 
-  return (
-    <SessionShell onSubmit={() => {}} inputDisabled>
-      {session.messages.map((msg) => (
-        <ChatMessage key={msg.id} msg={msg} />
-      ))}
-    </SessionShell>
-  );
+  return <SessionChat key={session.id} session={session}></SessionChat>;
 }

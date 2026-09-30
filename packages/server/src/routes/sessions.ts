@@ -3,18 +3,18 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 
-import { findSupportedChatModel } from "@nightcode/shared";
+import { findSupportedChatModel, MAX_MESSAGE_LENGTH } from "@nightcode/shared";
 import { Role, Mode, MessageStatus } from "@nightcode/database/enums";
 import { db } from "@nightcode/database/client";
 import * as Sentry from "@sentry/hono/bun";
 
 const createSessionSchema = z.object({
-  title: z.string(),
+  title: z.string().max(100),
   cwd: z.string().optional(),
   initialMessage: z
     .object({
       role: z.literal(Role.USER),
-      content: z.string(),
+      content: z.string().max(MAX_MESSAGE_LENGTH),
       mode: z.enum(Mode),
       model: z
         .string()
