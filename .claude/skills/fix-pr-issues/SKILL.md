@@ -63,6 +63,8 @@ If no actionable issues remain, report PR is merge-ready and stop.
 
 ## Step 3: Sync local workspace to PR branch
 
+If the PR contains commits by anyone other than the user, ask for explicit approval before running `bun install`, type-check or the smoke run. Approval to commit or push in Step 6 does not count.
+
 ```bash
 git status            # must be clean before switching; ask the user if not
 gh pr checkout "<url>"

@@ -88,13 +88,18 @@ The selected theme is saved to `~/.nightcode/preferences.json`.
 | Command                              | Description                    |
 |--------------------------------------|--------------------------------|
 | `bun run dev:cli`                    | Start the CLI in watch mode    |
+| `bun run dev:server`                 | Start the API server in hot-reload mode |
+| `bun run --cwd packages/database db:migrate:deploy` | Apply Prisma migrations (run before first `dev:server`) |
 | `bun run --cwd packages/cli typecheck` | Run TypeScript type-check    |
+
+`bun install` also generates the Prisma client (`postinstall`).
 
 ## Workflow
 
 - `main` is protected by convention: no direct pushes of unreviewed work.
 - Every working day: one runnable increment on a feature branch, PR with test/run evidence, peer review, then merge.
 - Branch naming: `<clickup-task-id>-<short-description>`.
+- PR descriptions follow [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
 
 ## Known limitations
 

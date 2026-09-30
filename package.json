@@ -1,11 +1,13 @@
 {
   "name": "nightcode",
   "version": "1.0.0",
-  "scripts": {
-    "dev:cli": "bun run --watch packages/cli/src/index.tsx",
-    "dev:server": "bun run --hot packages/server/src/index.ts"
-  },
+  "private": true,
   "workspaces": [
     "packages/*"
-  ]
+  ],
+  "scripts": {
+    "dev:cli": "bun run --watch packages/cli/src/index.tsx",
+    "dev:server": "bun run --hot packages/server/src/index.ts",
+    "postinstall": "bun run --cwd packages/database db:generate"
+  }
 }
