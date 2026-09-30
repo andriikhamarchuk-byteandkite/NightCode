@@ -45,7 +45,10 @@ export function Session() {
   const [session, setSession] = useState<SessionData | null>(prefetched);
 
   useEffect(() => {
-    if (prefetched) return;
+    if (prefetched) {
+      setSession(prefetched);
+      return;
+    }
 
     setSession(null);
     

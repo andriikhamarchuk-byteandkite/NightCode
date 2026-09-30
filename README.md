@@ -88,7 +88,11 @@ The selected theme is saved to `~/.nightcode/preferences.json`.
 | Command                              | Description                    |
 |--------------------------------------|--------------------------------|
 | `bun run dev:cli`                    | Start the CLI in watch mode    |
+| `bun run dev:server`                 | Start the API server in hot-reload mode |
+| `bun run --cwd packages/database db:migrate:deploy` | Apply Prisma migrations (run before first `dev:server`) |
 | `bun run --cwd packages/cli typecheck` | Run TypeScript type-check    |
+
+`bun install` also generates the Prisma client (`postinstall`).
 
 ## Workflow
 

@@ -12,7 +12,7 @@ const createSessionSchema = z.object({
   cwd: z.string().optional(),
   initialMessage: z
     .object({
-      role: z.enum(Role),
+      role: z.literal(Role.USER),
       content: z.string(),
       mode: z.enum(Mode),
       model: z

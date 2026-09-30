@@ -34,7 +34,6 @@ export function NewSession() {
 
     hasStartedRef.current = true;
 
-    let ignore = false;
     const createSession = async () => {
       try {
         const res = await apiClient.sessions.$post({
@@ -50,7 +49,6 @@ export function NewSession() {
           },
         });
 
-        if (ignore) return;
         if (!res.ok) {
           throw new Error(await getErrorMessage(res));
         }
@@ -60,7 +58,6 @@ export function NewSession() {
           state: { session },
         });
       } catch (error) {
-        if (ignore) return;
         toast.show({
           variant: "error",
           message:
@@ -71,9 +68,6 @@ export function NewSession() {
     };
 
     createSession();
-    return () => {
-      ignore = true;
-    };
   }, [state, navigate, toast]);
 
   if (!state) return null;
