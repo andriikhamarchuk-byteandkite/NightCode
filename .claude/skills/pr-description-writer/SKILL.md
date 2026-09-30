@@ -21,6 +21,7 @@ Project facts:
 3. Find the ClickUp ticket: take the task ID from the branch name, or ask the user. Skip for `project-setup`.
 4. Write the description in the format below and print it in the chat.
 5. If the user asked to create the PR, push the branch (`git push -u origin HEAD`) and create it with `gh pr create --base main`, using the draft as the body. Pushing and creating are not pre-approved, so they go through the normal permission prompt.
+6. After the PR is created, move the ClickUp task to `review` (`clickup_update_task`). Skip if it is already there or for `project-setup`.
 
 ## Format
 ```
