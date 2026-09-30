@@ -1,42 +1,41 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { Header } from "./components/header";
-import { InputBar } from "./components/input-bar";
-import { ToastProvider } from "./providers/toast";
-import { KeyboardLayerProvider } from "./providers/keyboard-layer";
+import { createMemoryRouter, RouterProvider } from "react-router";
+import { RootLayout } from "./layouts/root-layout";
+import { RouteError } from "./layouts/route-error";
 import { DialogProvider } from "./providers/dialog";
-import { ThemeProvider, useTheme } from "./providers/theme";
+import { KeyboardLayerProvider } from "./providers/keyboard-layer";
+import { ThemeProvider } from "./providers/theme";
+import { ToastProvider } from "./providers/toast";
+import { Home } from "./screens/home";
+import { NewSession } from "./screens/new-session";
+import { Session } from "./screens/session";
 
-function ThemedRoot() {
-  const { colors } = useTheme();
+const router = createMemoryRouter([
+  {
+    path: "/",
+    element: <RootLayout />,
+    errorElement: <RouteError />,
+    children: [
+      { index: true, element: <Home /> },
+      { path: "sessions/new", element: <NewSession /> },
+      { path: "sessions/:id", element: <Session /> },
+    ],
+  },
+]);
 
-  return (
-    <box
-      alignItems="center"
-      justifyContent="center"
-      backgroundColor={colors.background}
-      width="100%"
-      height="100%"
-      gap={2}
-    >
-      <Header />
-      <box width="100%" maxWidth={78} paddingX={2}>
-        <InputBar onSubmit={() => {}}></InputBar>
-      </box>
-    </box>
-  );
-}
-
+// Providers sit above the router so the route error screen stays themed
+// and Ctrl+C keeps working there.
 function App() {
   return (
     <ThemeProvider>
-      <KeyboardLayerProvider>
-        <DialogProvider>
-          <ToastProvider>
-            <ThemedRoot></ThemedRoot>
-          </ToastProvider>
-        </DialogProvider>
-      </KeyboardLayerProvider>
+      <ToastProvider>
+        <KeyboardLayerProvider>
+          <DialogProvider>
+            <RouterProvider router={router} />
+          </DialogProvider>
+        </KeyboardLayerProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }
