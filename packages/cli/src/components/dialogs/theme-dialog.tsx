@@ -7,16 +7,16 @@ import type { Theme } from "../../theme";
 
 export const ThemeDialogContent = () => {
   const dialog = useDialog();
-  const { setTheme, currentTheme } = useTheme();
+  const { setTheme, previewTheme, currentTheme } = useTheme();
   const originalThemeRef = useRef(currentTheme);
   const confirmedRef = useRef(false);
   useEffect(() => {
     return () => {
       if (!confirmedRef.current) {
-        setTheme(originalThemeRef.current);
+        previewTheme(originalThemeRef.current);
       }
     };
-  }, [setTheme]);
+  }, [previewTheme]);
 
   const handleSelect = useCallback(
     (theme: Theme) => {
@@ -29,9 +29,9 @@ export const ThemeDialogContent = () => {
 
   const handleHighlight = useCallback(
     (theme: Theme) => {
-      setTheme(theme);
+      previewTheme(theme);
     },
-    [setTheme],
+    [previewTheme],
   );
 
   return (
