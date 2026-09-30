@@ -66,4 +66,8 @@ const routes = app.route("/sessions", sessions).route("/chat", chat);
 
 export type AppType = typeof routes;
 
-export default { port: 3000, fetch: app.fetch, idleTimeout: 255 };
+export default {
+  port: Number(process.env.PORT) || 3000,
+  fetch: app.fetch,
+  idleTimeout: 255,
+};
