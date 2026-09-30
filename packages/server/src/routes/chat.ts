@@ -5,11 +5,11 @@ import { z } from "zod";
 import { streamText as aiStreamText } from "ai";
 import { db } from "@nightcode/database/client";
 import { Mode, MessageStatus } from "@nightcode/database/enums";
-import { type ChatStreamEvent } from "@nightcode/shared";
+import { MAX_MESSAGE_LENGTH, type ChatStreamEvent } from "@nightcode/shared";
 import { isSupportedChatModel, resolveChatModel } from "../lib/models";
 
 const submitSchema = z.object({
-  content: z.string(),
+  content: z.string().max(MAX_MESSAGE_LENGTH),
   mode: z.enum(Mode),
   model: z.string().refine(isSupportedChatModel, "Unsupported model"),
 });
@@ -20,7 +20,9 @@ const submitValidator = zValidator("json", submitSchema, (result, c) => {
   }
 });
 
-const activeResumeSessionIds = new Set<string>();
+// Sessions with a stream in progress (submit or resume). Released only after
+// the stream and its message persistence finish, so rows keep their order.
+const activeStreamSessionIds = new Set<string>();
 
 function buildConversationHistory(
   messages: {
@@ -73,9 +75,9 @@ async function streamAIResponse(
   const resolvedModel = resolveChatModel(model);
   let fullText = "";
 
+  // Persisted even when empty, so an interrupted turn never looks like a
+  // pending user message that auto-resume would regenerate.
   const persistInterruptedMessage = async () => {
-    if (fullText.length === 0) return;
-
     const elapsedMs = Date.now() - startTime;
 
     await db.message.create({
@@ -149,6 +151,10 @@ async function streamAIResponse(
 
     const message = err instanceof Error ? err.message : String(err);
 
+    if (fullText.length > 0) {
+      await persistInterruptedMessage();
+    }
+
     await db.message.create({
       data: {
         sessionId,
@@ -195,16 +201,16 @@ const app = new Hono()
       );
     }
 
-    if (activeResumeSessionIds.has(sessionId)) {
+    if (activeStreamSessionIds.has(sessionId)) {
       return c.json(
         {
-          error: "Session already has an active resume",
+          error: "Session already has an active response",
         },
         409,
       );
     }
 
-    activeResumeSessionIds.add(sessionId);
+    activeStreamSessionIds.add(sessionId);
 
     const history = buildConversationHistory(session.messages);
     const abortController = new AbortController();
@@ -226,11 +232,11 @@ const app = new Hono()
               abortController,
             });
           } finally {
-            activeResumeSessionIds.delete(sessionId);
+            activeStreamSessionIds.delete(sessionId);
           }
         },
         async (err, stream) => {
-          activeResumeSessionIds.delete(sessionId);
+          activeStreamSessionIds.delete(sessionId);
           const message = err instanceof Error ? err.message : String(err);
           const errorEvent: ChatStreamEvent = { type: "error", message };
           await stream.writeSSE({
@@ -240,7 +246,7 @@ const app = new Hono()
         },
       );
     } catch (error) {
-      activeResumeSessionIds.delete(sessionId);
+      activeStreamSessionIds.delete(sessionId);
       throw error;
     }
   })
@@ -258,52 +264,73 @@ const app = new Hono()
 
     const data = c.req.valid("json");
 
-    await db.message.create({
-      data: {
-        sessionId,
-        role: "USER",
-        status: MessageStatus.COMPLETE,
-        model: data.model,
-        content: data.content,
-        mode: data.mode,
-      },
-    });
+    if (activeStreamSessionIds.has(sessionId)) {
+      return c.json(
+        {
+          error: "Session already has an active response",
+        },
+        409,
+      );
+    }
 
-    const history = buildConversationHistory([
-      ...session.messages,
-      {
-        role: "USER" as const,
-        content: data.content,
-        status: MessageStatus.COMPLETE,
-      },
-    ]);
+    activeStreamSessionIds.add(sessionId);
 
-    const abortController = new AbortController();
-
-    return streamSSE(
-      c,
-      async (stream) => {
-        stream.onAbort(() => {
-          abortController.abort();
-        });
-
-        await streamAIResponse(stream, {
+    try {
+      await db.message.create({
+        data: {
           sessionId,
+          role: "USER",
+          status: MessageStatus.COMPLETE,
           model: data.model,
-          history,
+          content: data.content,
           mode: data.mode,
-          abortController,
-        });
-      },
-      async (err, stream) => {
-        const message = err instanceof Error ? err.message : String(err);
-        const errorEvent: ChatStreamEvent = { type: "error", message };
-        await stream.writeSSE({
-          event: "error",
-          data: JSON.stringify(errorEvent),
-        });
-      },
-    );
+        },
+      });
+
+      const history = buildConversationHistory([
+        ...session.messages,
+        {
+          role: "USER" as const,
+          content: data.content,
+          status: MessageStatus.COMPLETE,
+        },
+      ]);
+
+      const abortController = new AbortController();
+
+      return streamSSE(
+        c,
+        async (stream) => {
+          stream.onAbort(() => {
+            abortController.abort();
+          });
+
+          try {
+            await streamAIResponse(stream, {
+              sessionId,
+              model: data.model,
+              history,
+              mode: data.mode,
+              abortController,
+            });
+          } finally {
+            activeStreamSessionIds.delete(sessionId);
+          }
+        },
+        async (err, stream) => {
+          activeStreamSessionIds.delete(sessionId);
+          const message = err instanceof Error ? err.message : String(err);
+          const errorEvent: ChatStreamEvent = { type: "error", message };
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify(errorEvent),
+          });
+        },
+      );
+    } catch (error) {
+      activeStreamSessionIds.delete(sessionId);
+      throw error;
+    }
   });
 
 export default app;

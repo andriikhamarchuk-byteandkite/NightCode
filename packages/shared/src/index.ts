@@ -9,6 +9,7 @@ export {
 } from "./models";
 
 export {
+  MAX_MESSAGE_LENGTH,
   toolCallArgsSchema,
   messagePartSchema,
   messagePartsSchema,

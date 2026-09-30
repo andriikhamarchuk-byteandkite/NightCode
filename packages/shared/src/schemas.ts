@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const MAX_MESSAGE_LENGTH = 20_000;
+
 export const toolCallArgsSchema = z.record(z.string(), z.json());
 
 export const messagePartSchema = z.discriminatedUnion("type", [

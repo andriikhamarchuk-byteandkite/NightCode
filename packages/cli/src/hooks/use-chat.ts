@@ -179,6 +179,9 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
               content: message,
             },
           ]);
+          // Stop the server stream too, otherwise it keeps generating and
+          // saves a reply this client never shows.
+          activeStream.controller.abort();
           break;
         }
 

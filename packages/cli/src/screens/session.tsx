@@ -7,7 +7,7 @@ import { UserMessage, BotMessage, ErrorMessage } from "../components/messages";
 import { useToast } from "../providers/toast";
 import { apiClient } from "../lib/api-client";
 import { getErrorMessage } from "../lib/http-errors";
-import { MessageStatus } from "@nightcode/database";
+import { MessageStatus } from "@nightcode/database/enums";
 import {
   DEFAULT_CHAT_MODEL_ID,
   type SupportedChatModelId,
@@ -85,6 +85,7 @@ function SessionChat({ session }: { session: SessionData }) {
       onSubmit={(text) =>
         submit({ userText: text, mode: "BUILD", model: DEFAULT_CHAT_MODEL_ID })
       }
+      inputDisabled={streaming.status === "streaming"}
       loading={streaming.status === "streaming"}
       interruptible={streaming.status === "streaming"}
     >
@@ -111,6 +112,9 @@ function ChatMessage({ msg }: { msg: Message }) {
   if (msg.role === "error") {
     return <ErrorMessage message={msg.content} />;
   }
+
+  // Interrupted before the first token: kept in history, nothing to show.
+  if (msg.interrupted && msg.content.length === 0) return null;
 
   return (
     <BotMessage
