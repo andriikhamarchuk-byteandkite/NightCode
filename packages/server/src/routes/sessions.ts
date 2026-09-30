@@ -13,7 +13,7 @@ const createSessionSchema = z.object({
   cwd: z.string().optional(),
   initialMessage: z
     .object({
-      role: z.enum(Role),
+      role: z.literal(Role.USER),
       content: z.string(),
       mode: z.enum(Mode),
       model: z
@@ -107,7 +107,6 @@ const app = new Hono()
 
     Sentry.logger.info("Created session", {
       sessionId: session.id,
-      title: session.title,
     });
 
     return c.json(session, 201);

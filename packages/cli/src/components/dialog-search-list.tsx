@@ -47,7 +47,10 @@ export function DialogSearchList<T>({
     if (scrollbox) {
       scrollbox.scrollTo(0);
     }
-  }, []);
+
+    const first = text ? items.find((item) => filterFn(item, text)) : items[0];
+    if (first && onHighlight) onHighlight(first);
+  }, [items, filterFn, onHighlight]);
 
   const filtered = searchValue
     ? items.filter((item) => filterFn(item, searchValue))
@@ -64,32 +67,28 @@ export function DialogSearchList<T>({
         onSelect(item);
       }
     } else if (key.name === "up") {
-      setSelectedIndex((i) => {
-        const newIndex = Math.max(0, i - 1);
-        const sb = scrollRef.current;
-        if (sb && newIndex < sb.scrollTop) {
-          sb.scrollTo(newIndex);
-        }
-        const item = filtered[newIndex];
-        if (item && onHighlight) onHighlight(item);
-        return newIndex;
-      });
+      const newIndex = Math.max(0, selectedIndex - 1);
+      setSelectedIndex(newIndex);
+      const sb = scrollRef.current;
+      if (sb && newIndex < sb.scrollTop) {
+        sb.scrollTo(newIndex);
+      }
+      const item = filtered[newIndex];
+      if (item && onHighlight) onHighlight(item);
     } else if (key.name === "down") {
-      setSelectedIndex((i) => {
-        if (filtered.length === 0) return 0;
-        const newIndex = Math.min(filtered.length - 1, i + 1);
-        const sb = scrollRef.current;
-        if (sb) {
-          const viewportHeight = sb.viewport.height;
-          const visibleEnd = sb.scrollTop + viewportHeight - 1;
-          if (newIndex > visibleEnd) {
-            sb.scrollTo(newIndex - viewportHeight + 1);
-          }
+      if (filtered.length === 0) return;
+      const newIndex = Math.min(filtered.length - 1, selectedIndex + 1);
+      setSelectedIndex(newIndex);
+      const sb = scrollRef.current;
+      if (sb) {
+        const viewportHeight = sb.viewport.height;
+        const visibleEnd = sb.scrollTop + viewportHeight - 1;
+        if (newIndex > visibleEnd) {
+          sb.scrollTo(newIndex - viewportHeight + 1);
         }
-        const item = filtered[newIndex];
-        if (item && onHighlight) onHighlight(item);
-        return newIndex;
-      });
+      }
+      const item = filtered[newIndex];
+      if (item && onHighlight) onHighlight(item);
     }
   });
 
