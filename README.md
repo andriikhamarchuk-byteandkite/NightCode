@@ -11,12 +11,12 @@ Sections from the video, with source timestamps and time budgets (38h total):
 
 | #  | Section                           | Timestamp | Budget | Status  |
 |----|-----------------------------------|-----------|--------|---------|
-| 0  | Project Setup & Components        | 0:07:38   | —      | review  |
-| 1  | UI Infrastructure                 | 1:16:14   | 4h     | review  |
-| 2  | Routing & Screen Layout           | 2:51:25   | 3h     | todo    |
-| 3  | Server, Shared Package & Database | 3:25:56   | 5h     | todo    |
-| 4  | Sentry Monitoring                 | 5:08:06   | 1h     | todo    |
-| 5  | AI Chat Streaming                 | 5:26:13   | 6h     | todo    |
+| 0  | Project Setup & Components        | 0:07:38   | —      | done    |
+| 1  | UI Infrastructure                 | 1:16:14   | 4h     | done    |
+| 2  | Routing & Screen Layout           | 2:51:25   | 3h     | done    |
+| 3  | Server, Shared Package & Database | 3:25:56   | 5h     | done    |
+| 4  | Sentry Monitoring                 | 5:08:06   | 1h     | done    |
+| 5  | AI Chat Streaming                 | 5:26:13   | 6h     | done    |
 | 6  | Session Management                | 7:04:20   | 4h     | todo    |
 | 7  | Tool Calling                      | 7:39:58   | 5h     | todo    |
 | 8  | Completing The User Experience    | 8:53:05   | 3h     | todo    |
