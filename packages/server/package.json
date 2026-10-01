@@ -13,6 +13,7 @@
     "@ai-sdk/anthropic": "^4.0.69",
     "@ai-sdk/openai": "^4.0.82",
     "@ai-sdk/provider-utils": "^5.0.52",
+    "@clerk/backend": "^3.21.1",
     "@hono/zod-validator": "^0.9.1",
     "@nightcode/database": "workspace:*",
     "@nightcode/shared": "workspace:*",
