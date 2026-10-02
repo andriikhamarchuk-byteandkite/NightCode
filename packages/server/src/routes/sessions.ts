@@ -3,11 +3,13 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 
-import { findSupportedChatModel, MAX_MESSAGE_LENGTH } from "@nightcode/shared";
+import { MAX_MESSAGE_LENGTH } from "@nightcode/shared";
 import { Role, Mode, MessageStatus } from "@nightcode/database/enums";
 import { db } from "@nightcode/database/client";
 import * as Sentry from "@sentry/hono/bun";
 import type { AuthenticatedEnv } from "../middleware/require-auth";
+import { isSupportedChatModel } from "../lib/models";
+import { requireCreditsBalance } from "../middleware/require-credits-balance";
 
 const createSessionSchema = z.object({
   title: z.string().max(100),
@@ -17,9 +19,7 @@ const createSessionSchema = z.object({
       role: z.literal(Role.USER),
       content: z.string().max(MAX_MESSAGE_LENGTH),
       mode: z.enum(Mode),
-      model: z
-        .string()
-        .refine((id) => !!findSupportedChatModel(id), "Unsupported model"),
+      model: z.string().refine(isSupportedChatModel, "Unsupported model"),
     })
     .optional(),
 });
@@ -82,7 +82,7 @@ const app = new Hono<AuthenticatedEnv>()
 
     return c.json(session);
   })
-  .post("/", createSessionValidator, async (c) => {
+  .post("/", createSessionValidator, requireCreditsBalance, async (c) => {
     // MOCK: Uncomment to simulate slow session loading
     // await new Promise((r) => setTimeout(r, 5000))
 
