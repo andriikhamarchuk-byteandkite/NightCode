@@ -21,7 +21,7 @@ Sections from the video, with source timestamps and time budgets (38h total):
 | 7  | Tool Calling                      | 7:39:58   | 5h     | review  |
 | 8  | Completing The User Experience    | 8:53:05   | 3h     | review  |
 | 9  | Usage Based Billing               | 10:02:57  | 2h     | todo    |
-| 10 | Client-Side Tool Execution        | 10:36:27  | 5h     | todo    |
+| 10 | Client-Side Tool Execution        | 10:36:27  | 5h     | review  |
 
 ## Tech stack
 
@@ -84,6 +84,22 @@ Run both from the repo root so Bun picks up `.env`. In the CLI, run `/login` fir
 
 `dev:cli` restarts on file changes. Quit with `/exit`.
 
+### `nightcode` command
+
+To run the CLI in any project directory:
+
+```bash
+bun run link:cli    # once; registers the `nightcode` command
+cd path/to/your/project
+nightcode
+```
+
+The tools then work on the directory you started `nightcode` in. The command still reads `API_URL` and the Clerk settings from this repo's `.env`, so it can point at a local or deployed server.
+
+`bun link` puts the command in `~/.bun/bin`, which must be on `PATH`. If Bun was installed through npm, also add the folder with `bun.exe` (`%APPDATA%
+pm
+ode_modulesunin`), because the command looks for `bun.exe` there.
+
 ### Type-check
 
 ```bash
@@ -101,17 +117,16 @@ packages/
 │       ├── layouts/      # Root layout, route error screen
 │       ├── components/   # Input bar (@ mentions), messages, dialogs, command menu, status bar
 │       ├── providers/    # Theme, keyboard layers, dialog, toast, prompt config (mode/model)
-│       ├── hooks/        # useChat: streaming assistant replies
-│       └── lib/          # Typed API client, auth token storage, OAuth login flow
+│       ├── hooks/        # useChat: AI SDK chat, local tool runs, approvals
+│       └── lib/          # Typed API client, auth, OAuth login flow, local tool executor
 ├── server/               # Hono API
 │   └── src/
 │       ├── index.ts      # App, Sentry, error handler, auth middleware, routes
 │       ├── routes/       # /sessions, /chat, /auth/callback
 │       ├── middleware/   # requireAuth: verifies the Clerk OAuth token, sets userId
-│       ├── tools/        # Agent tools (read, list, grep, glob, write, edit, bash)
 │       └── system-prompt.ts
 ├── database/             # Prisma schema, migrations, client
-└── shared/               # Model list and schemas shared by CLI and server
+└── shared/               # Model list, modes and tool schemas shared by CLI and server
 ```
 
 ## Usage
@@ -128,20 +143,29 @@ Local files: `~/.nightcode/preferences.json` (theme) and `~/.nightcode/auth.json
 
 ## Agent tools and permissions
 
-The agent runs tools on the server, inside the session's working directory (`cwd`). Sessions without a `cwd` get no tools.
+Tools run in the CLI, on the user's machine, inside the directory the CLI was started from. The server only sends the tool schemas to the model and never executes a tool:
 
-| Tool            | Plan | Build | Limits |
-|-----------------|:----:|:-----:|--------|
-| `readFile`      | yes  | yes   | Path must stay inside `cwd`; output truncated at 10,000 chars |
-| `listDirectory` | yes  | yes   | Path must stay inside `cwd` |
-| `grep`          | yes  | yes   | Path must stay inside `cwd`; max 50 matches |
-| `glob`          | yes  | yes   | Path must stay inside `cwd`; max 200 results |
-| `writeFile`     | no   | yes   | Path must stay inside `cwd` |
-| `editFile`      | no   | yes   | Path must stay inside `cwd` |
-| `bash`          | no   | yes   | Runs in `cwd`; 30 s default / 120 s max timeout; output truncated at 20,000 chars; env vars matching `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `DATABASE_URL` are removed |
+1. The model asks for a tool; the server streams the call to the CLI and ends the request.
+2. The CLI runs the tool locally (after approval, if needed) and sends the result back.
+3. The server adds the result to the stored message and starts the next model step.
 
-- **Plan** mode is read-only: the model never receives write or shell tools.
-- One reply can use at most 50 tool steps.
+| Tool            | Plan | Build | Approval | Limits |
+|-----------------|:----:|:-----:|:--------:|--------|
+| `readFile`      | yes  | yes   | no       | Path must stay inside the working directory; output truncated at 10,000 chars |
+| `listDirectory` | yes  | yes   | no       | Path must stay inside the working directory |
+| `grep`          | yes  | yes   | no       | Path must stay inside the working directory; max 50 matches |
+| `glob`          | yes  | yes   | no       | Path must stay inside the working directory; max 200 results |
+| `writeFile`     | no   | yes   | yes      | Path must stay inside the working directory |
+| `editFile`      | no   | yes   | yes      | Path must stay inside the working directory; `oldString` must match exactly once |
+| `bash`          | no   | yes   | yes      | Runs in the working directory; 30 s default timeout; output truncated at 20,000 chars |
+
+- **Approval:** before a write or shell tool runs, the CLI shows the tool name and its input. `y`/Enter allows it; `n`/Esc/Ctrl+C rejects it. A rejected call is returned to the model as an error, so it can try another way.
+- **Errors:** a failed tool (missing file, path outside the project, non-zero exit code) is returned to the model as its result, and the UI shows the error next to the call.
+- **Interrupt:** Esc during a turn stops the stream, kills a running `bash` command and closes pending tool calls as interrupted; the turn does not continue on its own.
+- **Plan** mode is read-only: the model only gets the read tools, and the CLI also refuses write and shell tools in Plan mode.
+- **Trust boundary:** the server keeps the conversation history. The CLI can only add a new user message or fill in results for tool calls that are still waiting; it cannot rewrite earlier messages.
+- On Windows, `bash` and `grep` come from Git for Windows (found through `git` on `PATH`), not from the WSL launcher in `System32`. The model is told the OS and to use POSIX commands.
+- One turn can use at most 50 model steps; after that the model must answer in text.
 - Sessions and chat are scoped to the signed-in Clerk user; another user's session returns 404.
 
 ## Scripts
@@ -150,6 +174,7 @@ The agent runs tools on the server, inside the session's working directory (`cwd
 |--------------------------------------|--------------------------------|
 | `bun run dev:cli`                    | Start the CLI in watch mode    |
 | `bun run dev:server`                 | Start the API server in hot-reload mode |
+| `bun run link:cli`                   | Register the global `nightcode` command |
 | `bun run --cwd packages/database db:migrate:deploy` | Apply Prisma migrations (run before first `dev:server`) |
 | `bun run --cwd packages/cli typecheck` | Run TypeScript type-check    |
 
@@ -164,11 +189,12 @@ The agent runs tools on the server, inside the session's working directory (`cwd
 
 ## Known limitations
 
-- Tools run on the server's filesystem, so server and CLI must run on the same machine. Client-side tool execution arrives in section 10.
-- `bash` is not sandboxed: only the file tools check paths, and Build mode has no per-command approval prompt.
+- `bash` is not sandboxed: once approved, a command can read or change anything the user can, and it gets the CLI's full environment, including `.env` values.
+- The file tools resolve paths without following symlinks, so a symlink inside the project can point outside it.
+- The `1_session_ui_messages` migration drops the old `Message` table: sessions created before it open with an empty history.
 - `/upgrade` and `/usage` show placeholder toasts; billing arrives in section 9.
 - The OAuth token is not refreshed: once it expires, the server returns 401, the CLI deletes the token, and you need to `/login` again.
-- The CLI reads Clerk settings from `.env`, so start it from the repo root.
+- `bun run dev:cli` reads `.env` from the current directory, so start it from the repo root; the `nightcode` command loads the repo's `.env` itself.
 - Sessions created before auth (owned by `mock-user`) are no longer visible.
 - Theme preview also writes `~/.nightcode/preferences.json` on every highlighted theme (reverted on Esc).
 - Dependencies are newer than in the video (`@opentui/*` 0.5.x vs 0.1.x), so some APIs may differ from the recording.

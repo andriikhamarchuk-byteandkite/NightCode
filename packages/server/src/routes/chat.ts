@@ -1,35 +1,84 @@
 import { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import * as Sentry from "@sentry/hono/bun";
 import {
-  streamText as aiStreamText,
-  stepCountIs,
+  convertToModelMessages,
+  streamText,
+  validateUIMessages,
+  type InferUITools,
   type LanguageModelUsage,
+  type UIMessage,
 } from "ai";
 import { db } from "@nightcode/database/client";
-import { Mode, MessageStatus } from "@nightcode/database/enums";
-import {
-  MAX_MESSAGE_LENGTH,
-  messagePartsSchema,
-  toolCallArgsSchema,
-  type ChatStreamEvent,
-  type MessagePart,
-} from "@nightcode/shared";
-import { isSupportedChatModel, resolveChatModel } from "../lib/models";
 import type { Prisma } from "@nightcode/database";
-import { createTools } from "../tools";
+import {
+  buildToolContracts,
+  getToolContracts,
+  modeSchema,
+  type ModeType,
+  type ToolContracts,
+} from "@nightcode/shared";
 import { buildSystemPrompt } from "../system-prompt";
 import type { AuthenticatedEnv } from "../middleware/require-auth";
+import { requireCreditsBalance } from "../middleware/require-credits-balance";
 import { calculateCreditsForUsage } from "../lib/credits";
 import { ingestAiUsage } from "../lib/polar";
-import { requireCreditsBalance } from "../middleware/require-credits-balance";
+import { isSupportedChatModel, resolveChatModel } from "../lib/models";
+
+const MAX_MESSAGE_LENGTH = 20_000;
+
+// Each request runs a single model step; the client sends the next one after
+// it runs the requested tools. Once a turn reaches this many steps the model
+// may no longer call tools, so it has to answer in text and the loop ends.
+const MAX_STEPS_PER_TURN = 50;
+
+const INTERRUPTED_TOOL_ERROR =
+  "Interrupted by the user before the tool returned a result";
+
+type ChatMessageMetadata = {
+  mode?: ModeType;
+  model?: string;
+  durationMs?: number;
+  usage?: LanguageModelUsage;
+  interrupted?: boolean;
+  error?: string;
+};
+
+type NightcodeUIMessage = UIMessage<
+  ChatMessageMetadata,
+  never,
+  InferUITools<ToolContracts>
+>;
+
+type MessagePart = NightcodeUIMessage["parts"][number];
+type ToolPart = Extract<MessagePart, { toolCallId: string }>;
 
 const submitSchema = z.object({
-  content: z.string().max(MAX_MESSAGE_LENGTH),
-  mode: z.enum(Mode),
+  id: z.string(),
+  messages: z
+    .array(
+      z.custom<NightcodeUIMessage>((value) => {
+        return (
+          value != null &&
+          typeof value === "object" &&
+          "id" in value &&
+          typeof value.id === "string" &&
+          "role" in value &&
+          (value.role === "user" || value.role === "assistant") &&
+          "parts" in value &&
+          Array.isArray(value.parts)
+        );
+      }),
+    )
+    .min(1),
+  mode: modeSchema,
   model: z.string().refine(isSupportedChatModel, "Unsupported model"),
+  // process.platform of the client, e.g. "win32"; goes into the system prompt.
+  platform: z
+    .string()
+    .regex(/^[a-z0-9]{1,20}$/)
+    .optional(),
 });
 
 const submitValidator = zValidator("json", submitSchema, (result, c) => {
@@ -38,488 +87,330 @@ const submitValidator = zValidator("json", submitSchema, (result, c) => {
   }
 });
 
-// Sessions with a stream in progress (submit or resume). Released only after
-// the stream and its message persistence finish, so rows keep their order.
+// Sessions with a request in progress. Released once the response messages
+// are persisted, so two requests never overwrite each other's messages.
 const activeStreamSessionIds = new Set<string>();
 
-function buildConversationHistory(
-  messages: {
-    role: "USER" | "ASSISTANT" | "ERROR";
-    content: string;
-    status: MessageStatus;
-  }[],
-) {
-  return messages.flatMap((m) => {
-    if (m.role === "ERROR") return [];
-    if (m.role === "ASSISTANT" && m.content.length === 0) return [];
-    return [
-      {
-        role: m.role === "USER" ? ("user" as const) : ("assistant" as const),
-        content: m.content,
-      },
-    ];
-  });
+function isToolPart(part: MessagePart): part is ToolPart {
+  return "toolCallId" in part;
 }
 
-function getResumableUserMessage(
-  messages: {
-    role: "USER" | "ASSISTANT" | "ERROR";
-    model: string;
-    mode: Mode;
-  }[],
-) {
-  const lastMessage = messages[messages.length - 1];
-  if (!lastMessage || lastMessage.role !== "USER") {
-    return null;
-  }
-
-  return lastMessage;
+function getTextLength(message: NightcodeUIMessage) {
+  return message.parts.reduce(
+    (length, part) =>
+      part.type === "text" ? length + part.text.length : length,
+    0,
+  );
 }
 
-type StreamParams = {
-  sessionId: string;
-  userId: string;
-  model: string;
-  cwd: string | null;
-  history: { role: "user" | "assistant"; content: string }[];
-  mode: Mode;
-  abortController: AbortController;
-};
-
-type IngestUsageForMessageParams = {
-  messageId: string;
-  status: "complete" | "interrupted";
-};
-
-function getErrorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function serializeParts(parts: MessagePart[]): {
-  content: string;
-  parts: Prisma.InputJsonValue | undefined;
-} {
-  const content = parts
-    .filter((p) => p.type === "text")
-    .map((p) => p.text)
-    .join("");
+// Copies the results of the tools the client ran into the stored assistant
+// message. Only tool calls still waiting for a result are filled in.
+function applyToolOutputs(
+  stored: NightcodeUIMessage,
+  incoming: NightcodeUIMessage,
+): NightcodeUIMessage {
+  const incomingToolParts = new Map(
+    incoming.parts.filter(isToolPart).map((part) => [part.toolCallId, part]),
+  );
 
   return {
-    content,
-    parts: parts.length > 0 ? messagePartsSchema.parse(parts) : undefined,
+    ...stored,
+    parts: stored.parts.map((part) => {
+      if (!isToolPart(part) || part.state !== "input-available") return part;
+
+      const result = incomingToolParts.get(part.toolCallId);
+
+      if (result?.state === "output-available") {
+        return { ...part, state: "output-available", output: result.output };
+      }
+
+      if (result?.state === "output-error") {
+        return { ...part, state: "output-error", errorText: result.errorText };
+      }
+
+      return part;
+    }) as MessagePart[],
   };
 }
 
-async function streamAIResponse(
-  stream: Parameters<Parameters<typeof streamSSE>[1]>[0],
-  params: StreamParams,
+// The client sends only the new user message, or the last assistant message
+// with the results of the tools it ran. Everything else comes from the
+// database, so the client cannot rewrite earlier turns.
+function mergeClientMessages(
+  stored: NightcodeUIMessage[],
+  incoming: NightcodeUIMessage[],
+  metadata: ChatMessageMetadata,
 ) {
-  const { sessionId, userId, model, history, cwd, mode, abortController } =
-    params;
-  const startTime = Date.now();
-  const resolvedModel = resolveChatModel(model);
-  const parts: MessagePart[] = [];
-  const tools = cwd ? createTools(cwd, mode) : undefined;
+  const merged = [...stored];
 
-  // Collected per step instead of from onFinish, which does not fire when the
-  // turn is aborted; steps that finished before the abort are still billed.
-  const stepUsages: LanguageModelUsage[] = [];
+  for (const message of incoming) {
+    const storedIndex = merged.findIndex((m) => m.id === message.id);
 
-  // Persisted even when empty, so an interrupted turn never looks like a
-  // pending user message that auto-resume would regenerate.
-  const persistInterruptedMessage = async () => {
-    const elapsedMs = Date.now() - startTime;
+    if (message.role === "user") {
+      if (storedIndex !== -1) continue;
 
-    return db.message.create({
-      data: {
-        sessionId,
-        role: "ASSISTANT",
-        status: MessageStatus.INTERRUPTED,
-        model,
-        ...serializeParts(parts),
-        mode,
-        duration: Math.round(elapsedMs / 1000),
-      },
-    });
-  };
-
-  const ingestUsageForMessage = async ({
-    messageId,
-    status,
-  }: IngestUsageForMessageParams) => {
-    if (stepUsages.length === 0) return;
-
-    try {
-      const billableUsage = calculateCreditsForUsage({
-        provider: resolvedModel.provider,
-        model: resolvedModel.modelId,
-        stepUsages,
+      merged.push({
+        id: message.id,
+        role: "user",
+        parts: message.parts.filter((part) => part.type === "text"),
+        metadata,
       });
-
-      await ingestAiUsage({
-        externalCustomerId: userId,
-        eventId: `chat-message:${messageId}`,
-        credits: billableUsage.credits,
-      });
-
-      Sentry.logger.info("Ingested AI usage", {
-        sessionId,
-        messageId,
-        status,
-        credits: billableUsage.credits,
-      });
-    } catch (error) {
-      console.error("Failed to ingest Polar AI usage for chat message", error);
-      Sentry.captureException(error, {
-        extra: { sessionId, messageId, status },
-      });
-    }
-  };
-
-  const persistInterruptedMessageAndUsage = async () => {
-    const interruptedMessage = await persistInterruptedMessage();
-    if (!interruptedMessage) return;
-
-    await ingestUsageForMessage({
-      messageId: interruptedMessage.id,
-      status: "interrupted",
-    });
-  };
-
-  try {
-    const result = aiStreamText({
-      model: resolvedModel.model,
-      system: buildSystemPrompt({ cwd, mode }),
-      messages: history,
-      tools,
-      stopWhen: tools ? stepCountIs(50) : undefined,
-      abortSignal: abortController.signal,
-      providerOptions: resolvedModel.providerOptions,
-      onStepEnd(step) {
-        stepUsages.push(step.usage);
-      },
-    });
-
-    for await (const part of result.stream) {
-      if (stream.aborted) break;
-
-      if (part.type === "reasoning-delta") {
-        const last = parts[parts.length - 1];
-        if (last && last.type === "reasoning") {
-          last.text += part.text;
-        } else {
-          parts.push({ type: "reasoning", text: part.text });
-        }
-        const event: ChatStreamEvent = {
-          type: "reasoning-delta",
-          text: part.text,
-        };
-        await stream.writeSSE({
-          event: "reasoning-delta",
-          data: JSON.stringify(event),
-        });
-      }
-
-      if (part.type === "text-delta") {
-        const last = parts[parts.length - 1];
-        if (last && last.type === "text") {
-          last.text += part.text;
-        } else {
-          parts.push({ type: "text", text: part.text });
-        }
-
-        const event: ChatStreamEvent = { type: "text-delta", text: part.text };
-        await stream.writeSSE({
-          event: "text-delta",
-          data: JSON.stringify(event),
-        });
-      }
-
-      if (part.type === "tool-call") {
-        const parsedArgs = toolCallArgsSchema.safeParse(part.input);
-        const args = parsedArgs.success ? parsedArgs.data : {};
-
-        parts.push({
-          type: "tool-call",
-          id: part.toolCallId,
-          name: part.toolName,
-          args,
-        });
-
-        const event: ChatStreamEvent = {
-          type: "tool-call",
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          args,
-        };
-        await stream.writeSSE({
-          event: "tool-call",
-          data: JSON.stringify(event),
-        });
-      }
-
-      // tool-error comes when the input fails the tool schema or execute
-      // throws; it is sent as a result so the client stops showing "calling".
-      if (part.type === "tool-result" || part.type === "tool-error") {
-        const output =
-          part.type === "tool-result"
-            ? part.output
-            : { error: getErrorText(part.error) };
-        const resultStr =
-          typeof output === "string" ? output : JSON.stringify(output);
-
-        const tcPart = parts.find(
-          (p): p is Extract<MessagePart, { type: "tool-call" }> =>
-            p.type === "tool-call" && p.id === part.toolCallId,
-        );
-
-        if (tcPart) {
-          tcPart.result = resultStr;
-        }
-
-        const event: ChatStreamEvent = {
-          type: "tool-result",
-          toolCallId: part.toolCallId,
-          result: resultStr,
-        };
-
-        await stream.writeSSE({
-          event: "tool-result",
-          data: JSON.stringify(event),
-        });
-      }
-
-      if (part.type === "error") {
-        throw part.error;
-      }
+      continue;
     }
 
-    if (stream.aborted || abortController.signal.aborted) {
-      await persistInterruptedMessageAndUsage();
-      return;
+    const isLastStoredAssistant =
+      storedIndex !== -1 &&
+      storedIndex === merged.length - 1 &&
+      merged[storedIndex]?.role === "assistant";
+
+    if (isLastStoredAssistant) {
+      merged[storedIndex] = applyToolOutputs(merged[storedIndex]!, message);
     }
-
-    const elapsedMs = Date.now() - startTime;
-
-    const assistantMessage = await db.message.create({
-      data: {
-        sessionId,
-        role: "ASSISTANT",
-        status: MessageStatus.COMPLETE,
-        model,
-        ...serializeParts(parts),
-        mode,
-        duration: Math.round(elapsedMs / 1000),
-      },
-    });
-
-    const doneEvent: ChatStreamEvent = {
-      type: "done",
-      messageId: assistantMessage.id,
-      durationMs: elapsedMs,
-    };
-
-    await stream.writeSSE({ event: "done", data: JSON.stringify(doneEvent) });
-
-    // After "done" so Polar latency does not delay the end of the reply.
-    await ingestUsageForMessage({
-      messageId: assistantMessage.id,
-      status: "complete",
-    });
-  } catch (err) {
-    if (abortController.signal.aborted) {
-      await persistInterruptedMessageAndUsage();
-      return;
-    }
-
-    const message = getErrorText(err);
-
-    if (parts.length > 0) {
-      await persistInterruptedMessageAndUsage();
-    }
-
-    await db.message.create({
-      data: {
-        sessionId,
-        role: "ERROR",
-        status: MessageStatus.COMPLETE,
-        model,
-        content: message,
-        mode,
-      },
-    });
-
-    const errorEvent: ChatStreamEvent = { type: "error", message };
-    await stream.writeSSE({ event: "error", data: JSON.stringify(errorEvent) });
   }
+
+  return merged;
 }
 
-const app = new Hono<AuthenticatedEnv>()
-  .post("/:sessionId/resume", async (c) => {
-    const sessionId = c.req.param("sessionId");
+// A tool call left without a result (the turn was interrupted, or the client
+// never sent it) would make the provider reject the whole history, so it is
+// closed as an error the model can see.
+function closePendingToolCalls(messages: NightcodeUIMessage[]) {
+  return messages.map((message) => ({
+    ...message,
+    parts: message.parts.flatMap((part): MessagePart[] => {
+      if (!isToolPart(part)) return [part];
+      if (part.state === "input-streaming") return [];
+      if (part.state === "input-available") {
+        return [
+          {
+            ...part,
+            state: "output-error",
+            errorText: INTERRUPTED_TOOL_ERROR,
+          } as MessagePart,
+        ];
+      }
+      return [part];
+    }),
+  }));
+}
+
+function countTurnSteps(messages: NightcodeUIMessage[]) {
+  const lastMessage = messages[messages.length - 1];
+  if (lastMessage?.role !== "assistant") return 0;
+
+  return lastMessage.parts.filter((part) => part.type === "step-start").length;
+}
+
+function hasContent(message: NightcodeUIMessage) {
+  return message.parts.some((part) => part.type !== "step-start");
+}
+
+const app = new Hono<AuthenticatedEnv>().post(
+  "/",
+  requireCreditsBalance,
+  submitValidator,
+  async (c) => {
     const userId = c.get("userId");
+    const { id, messages, mode, model, platform } = c.req.valid("json");
 
     const session = await db.session.findUnique({
-      where: { id: sessionId, userId },
-      include: { messages: { orderBy: { createdAt: "asc" } } },
+      where: { id, userId },
     });
 
     if (!session) {
       return c.json({ error: "Session not found" }, 404);
     }
 
-    const resumableMessage = getResumableUserMessage(session.messages);
-    if (!resumableMessage) {
-      return c.json(
-        { error: "Session has no pending user message to resume" },
-        409,
-      );
+    if (
+      messages.some(
+        (m) => m.role === "user" && getTextLength(m) > MAX_MESSAGE_LENGTH,
+      )
+    ) {
+      return c.json({ error: "Message is too long" }, 400);
     }
 
-    if (!isSupportedChatModel(resumableMessage.model)) {
-      return c.json(
-        {
-          error: `Session uses unsupported model: ${resumableMessage.model}`,
-        },
-        409,
-      );
+    if (activeStreamSessionIds.has(id)) {
+      return c.json({ error: "Session already has an active response" }, 409);
     }
 
-    if (activeStreamSessionIds.has(sessionId)) {
-      return c.json(
-        {
-          error: "Session already has an active response",
-        },
-        409,
-      );
-    }
+    const storedMessages = Array.isArray(session.messages)
+      ? (session.messages as unknown as NightcodeUIMessage[])
+      : [];
+    const mergedMessages = closePendingToolCalls(
+      mergeClientMessages(storedMessages, messages, { mode, model }),
+    );
 
-    activeStreamSessionIds.add(sessionId);
-
-    const history = buildConversationHistory(session.messages);
-    const abortController = new AbortController();
-
+    let nextMessages: NightcodeUIMessage[];
     try {
-      return streamSSE(
-        c,
-        async (stream) => {
-          stream.onAbort(() => {
-            abortController.abort();
-          });
-
-          try {
-            await streamAIResponse(stream, {
-              sessionId,
-              userId,
-              model: resumableMessage.model,
-              history,
-              cwd: session.cwd,
-              mode: resumableMessage.mode,
-              abortController,
-            });
-          } finally {
-            activeStreamSessionIds.delete(sessionId);
-          }
-        },
-        async (err, stream) => {
-          activeStreamSessionIds.delete(sessionId);
-          const message = err instanceof Error ? err.message : String(err);
-          const errorEvent: ChatStreamEvent = { type: "error", message };
-          await stream.writeSSE({
-            event: "error",
-            data: JSON.stringify(errorEvent),
-          });
-        },
-      );
+      // Validated against every tool, not only the ones of the current mode:
+      // a BUILD turn in the history keeps its writeFile and bash calls in PLAN.
+      nextMessages = await validateUIMessages<NightcodeUIMessage>({
+        messages: mergedMessages,
+        tools: buildToolContracts,
+      });
     } catch (error) {
-      activeStreamSessionIds.delete(sessionId);
-      throw error;
-    }
-  })
-  .post("/:sessionId", submitValidator, requireCreditsBalance, async (c) => {
-    const sessionId = c.req.param("sessionId");
-    const userId = c.get("userId");
-
-    const session = await db.session.findUnique({
-      where: { id: sessionId, userId },
-      include: { messages: { orderBy: { createdAt: "asc" } } },
-    });
-
-    if (!session) {
-      return c.json({ error: "Session not found" }, 404);
+      Sentry.captureException(error, { extra: { sessionId: id } });
+      return c.json({ error: "Invalid messages" }, 400);
     }
 
-    const data = c.req.valid("json");
-
-    if (activeStreamSessionIds.has(sessionId)) {
-      return c.json(
-        {
-          error: "Session already has an active response",
-        },
-        409,
-      );
-    }
-
-    activeStreamSessionIds.add(sessionId);
+    activeStreamSessionIds.add(id);
 
     try {
-      await db.message.create({
-        data: {
-          sessionId,
-          role: "USER",
-          status: MessageStatus.COMPLETE,
-          model: data.model,
-          content: data.content,
-          mode: data.mode,
+      const startTime = Date.now();
+      const requestId = crypto.randomUUID();
+      const resolvedModel = resolveChatModel(model);
+      // Replies that failed before producing anything are kept only to show
+      // the error in the session; the model gets no empty assistant turns.
+      const modelMessages = await convertToModelMessages(
+        nextMessages.filter((m) => m.role !== "assistant" || hasContent(m)),
+        { tools: buildToolContracts },
+      );
+
+      // Nothing new to answer: the client sent tool results the server could
+      // not match, so the history ends with the model's own reply. Providers
+      // reject that as assistant prefill.
+      if (modelMessages[modelMessages.length - 1]?.role === "assistant") {
+        activeStreamSessionIds.delete(id);
+        return c.json({ error: "Nothing to respond to" }, 400);
+      }
+
+      const activeTools = Object.keys(
+        getToolContracts(mode),
+      ) as (keyof ToolContracts)[];
+      const stepLimitReached =
+        countTurnSteps(nextMessages) >= MAX_STEPS_PER_TURN;
+
+      // Collected per step instead of from onFinish, which does not fire when
+      // the request is aborted; steps that finished before the abort are
+      // still billed.
+      const stepUsages: LanguageModelUsage[] = [];
+      let streamError: string | undefined;
+
+      const result = streamText({
+        model: resolvedModel.model,
+        system: buildSystemPrompt({ mode, platform }),
+        messages: modelMessages,
+        tools: buildToolContracts,
+        activeTools,
+        toolChoice: stepLimitReached ? "none" : undefined,
+        abortSignal: c.req.raw.signal,
+        providerOptions: resolvedModel.providerOptions,
+        onStepEnd(step) {
+          stepUsages.push(step.usage);
         },
       });
 
-      const history = buildConversationHistory([
-        ...session.messages,
-        {
-          role: "USER" as const,
-          content: data.content,
-          status: MessageStatus.COMPLETE,
+      return result.toUIMessageStreamResponse<NightcodeUIMessage>({
+        originalMessages: nextMessages,
+        // Sent to the client in the start chunk, so both sides use the same
+        // id and the next request's tool results match the stored message.
+        // A continued turn keeps the id of the last assistant message.
+        generateMessageId: () => crypto.randomUUID(),
+        messageMetadata({ part }) {
+          if (part.type === "start") {
+            return { mode, model };
+          }
+
+          if (part.type !== "finish") return undefined;
+
+          return {
+            mode,
+            model,
+            durationMs: Date.now() - startTime,
+            usage: part.totalUsage,
+          };
         },
-      ]);
-
-      const abortController = new AbortController();
-
-      return streamSSE(
-        c,
-        async (stream) => {
-          stream.onAbort(() => {
-            abortController.abort();
-          });
-
+        async onEnd({ messages: finalMessages, responseMessage, isAborted }) {
           try {
-            await streamAIResponse(stream, {
-              sessionId,
-              userId,
-              model: data.model,
-              history,
-              cwd: session.cwd,
-              mode: data.mode,
-              abortController,
+            const endedEarly = isAborted || streamError !== undefined;
+            const messagesToSave = finalMessages
+              .map((message) =>
+                endedEarly && message.id === responseMessage.id
+                  ? {
+                      ...message,
+                      metadata: {
+                        ...message.metadata,
+                        mode,
+                        model,
+                        durationMs: Date.now() - startTime,
+                        ...(isAborted ? { interrupted: true } : {}),
+                        ...(streamError ? { error: streamError } : {}),
+                      },
+                    }
+                  : message,
+              )
+              .filter(
+                (message) =>
+                  message.role !== "assistant" ||
+                  hasContent(message) ||
+                  message.metadata?.error !== undefined,
+              );
+
+            await db.session.update({
+              where: { id, userId },
+              data: {
+                messages: messagesToSave as unknown as Prisma.InputJsonValue,
+              },
+            });
+          } catch (error) {
+            console.error("Failed to persist chat messages", error);
+            Sentry.captureException(error, {
+              extra: { sessionId: id, messageId: responseMessage.id },
             });
           } finally {
-            activeStreamSessionIds.delete(sessionId);
+            activeStreamSessionIds.delete(id);
+          }
+
+          if (stepUsages.length === 0) return;
+
+          try {
+            const billableUsage = calculateCreditsForUsage({
+              provider: resolvedModel.provider,
+              model: resolvedModel.modelId,
+              usage: stepUsages,
+            });
+
+            // One turn spans several requests that continue the same message,
+            // so the event is keyed by request to keep Polar from dropping
+            // the later ones as duplicates.
+            await ingestAiUsage({
+              externalCustomerId: userId,
+              eventId: `chat-request:${requestId}`,
+              credits: billableUsage.credits,
+            });
+
+            Sentry.logger.info("Ingested AI usage", {
+              sessionId: id,
+              messageId: responseMessage.id,
+              requestId,
+              interrupted: isAborted,
+              credits: billableUsage.credits,
+            });
+          } catch (error) {
+            console.error(
+              "Failed to ingest Polar AI usage for chat message",
+              error,
+            );
+            Sentry.captureException(error, {
+              extra: {
+                sessionId: id,
+                messageId: responseMessage.id,
+                requestId,
+              },
+            });
           }
         },
-        async (err, stream) => {
-          activeStreamSessionIds.delete(sessionId);
-          const message = err instanceof Error ? err.message : String(err);
-          const errorEvent: ChatStreamEvent = { type: "error", message };
-          await stream.writeSSE({
-            event: "error",
-            data: JSON.stringify(errorEvent),
-          });
+        onError(error) {
+          Sentry.captureException(error, { extra: { sessionId: id } });
+          streamError = error instanceof Error ? error.message : String(error);
+          return streamError;
         },
-      );
+      });
     } catch (error) {
-      activeStreamSessionIds.delete(sessionId);
+      activeStreamSessionIds.delete(id);
       throw error;
     }
-  });
+  },
+);
 
 export default app;

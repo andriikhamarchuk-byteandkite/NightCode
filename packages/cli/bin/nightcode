@@ -1,0 +1,13 @@
+#!/usr/bin/env bun
+import dotenv from "dotenv";
+import path from "path";
+
+// Loaded by path, not from the current directory: the command runs inside
+// any project, but the CLI settings (API_URL, Clerk) live in the repo's .env.
+dotenv.config({
+  path: path.resolve(import.meta.dirname, "../../../.env"),
+  quiet: true,
+});
+
+// Imported dynamically so the env is set before any CLI module reads it.
+await import("../src/index.tsx");
