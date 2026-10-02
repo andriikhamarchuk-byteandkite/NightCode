@@ -84,6 +84,22 @@ Run both from the repo root so Bun picks up `.env`. In the CLI, run `/login` fir
 
 `dev:cli` restarts on file changes. Quit with `/exit`.
 
+### `nightcode` command
+
+To run the CLI in any project directory:
+
+```bash
+bun run link:cli    # once; registers the `nightcode` command
+cd path/to/your/project
+nightcode
+```
+
+The tools then work on the directory you started `nightcode` in. The command still reads `API_URL` and the Clerk settings from this repo's `.env`, so it can point at a local or deployed server.
+
+`bun link` puts the command in `~/.bun/bin`, which must be on `PATH`. If Bun was installed through npm, also add the folder with `bun.exe` (`%APPDATA%
+pm
+ode_modulesunin`), because the command looks for `bun.exe` there.
+
 ### Type-check
 
 ```bash
@@ -158,6 +174,7 @@ Tools run in the CLI, on the user's machine, inside the directory the CLI was st
 |--------------------------------------|--------------------------------|
 | `bun run dev:cli`                    | Start the CLI in watch mode    |
 | `bun run dev:server`                 | Start the API server in hot-reload mode |
+| `bun run link:cli`                   | Register the global `nightcode` command |
 | `bun run --cwd packages/database db:migrate:deploy` | Apply Prisma migrations (run before first `dev:server`) |
 | `bun run --cwd packages/cli typecheck` | Run TypeScript type-check    |
 
@@ -177,7 +194,7 @@ Tools run in the CLI, on the user's machine, inside the directory the CLI was st
 - The `1_session_ui_messages` migration drops the old `Message` table: sessions created before it open with an empty history.
 - `/upgrade` and `/usage` show placeholder toasts; billing arrives in section 9.
 - The OAuth token is not refreshed: once it expires, the server returns 401, the CLI deletes the token, and you need to `/login` again.
-- The CLI reads Clerk settings from `.env`, so start it from the repo root.
+- `bun run dev:cli` reads `.env` from the current directory, so start it from the repo root; the `nightcode` command loads the repo's `.env` itself.
 - Sessions created before auth (owned by `mock-user`) are no longer visible.
 - Theme preview also writes `~/.nightcode/preferences.json` on every highlighted theme (reverted on Esc).
 - Dependencies are newer than in the video (`@opentui/*` 0.5.x vs 0.1.x), so some APIs may differ from the recording.
