@@ -12,7 +12,7 @@ import {
 } from "@opentui/core";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import type { KeyBinding } from "@opentui/core";
-import { Mode } from "@nightcode/database/enums";
+import { Mode } from "@nightcode/shared";
 import { StatusBar } from "./status-bar";
 import { useCommandMenu } from "./command-menu/use-command-menu";
 import type { Command } from "./command-menu/types";

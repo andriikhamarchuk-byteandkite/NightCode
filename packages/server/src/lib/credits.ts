@@ -8,7 +8,7 @@ import type { LanguageModelUsage } from "ai";
 type CalculateCreditsForUsageParams = {
   provider: string;
   model: string;
-  stepUsages: LanguageModelUsage[];
+  usage: LanguageModelUsage[];
 };
 
 type BillableUsage = {
@@ -104,9 +104,9 @@ function convertUsdToCredits(estimatedCostUsd: number) {
 export function calculateCreditsForUsage({
   provider,
   model,
-  stepUsages,
+  usage,
 }: CalculateCreditsForUsageParams): BillableUsage {
-  const tokenCounts = getTokenCounts(stepUsages);
+  const tokenCounts = getTokenCounts(usage);
   const pricing = getModelPricing(provider, model);
   const estimatedCostUsd = estimateCostUsd(tokenCounts, pricing);
   const credits = convertUsdToCredits(estimatedCostUsd);
