@@ -35,10 +35,24 @@ export function getPolarServer(): PolarServer {
   return server;
 }
 
-const polar = new Polar({
-  accessToken: getPolarAccessToken(),
-  server: getPolarServer(),
-});
+// Created on first use, not at import: ESM imports run before index.ts
+// loads .env. index.ts checks the Polar env vars at startup.
+let polar: Polar | undefined;
+
+function getPolar() {
+  polar ??= new Polar({
+    accessToken: getPolarAccessToken(),
+    server: getPolarServer(),
+  });
+  return polar;
+}
+
+// Redirect target for Polar pages. Taken from env, not from the request,
+// because the Host header is client-controlled and wrong behind a proxy.
+function getBillingReturnUrl() {
+  const apiUrl = process.env.API_URL ?? "http://localhost:3000";
+  return new URL("/billing/success", apiUrl).toString();
+}
 
 function hasStatusCode(error: unknown): error is { statusCode: number } {
   return (
@@ -51,16 +65,14 @@ function hasStatusCode(error: unknown): error is { statusCode: number } {
 
 type CreateCheckoutUrlParams = {
   customerExternalId: string;
-  requestUrl: string;
 };
 
 export async function createCheckoutUrl({
   customerExternalId,
-  requestUrl,
 }: CreateCheckoutUrlParams) {
-  const result = await polar.checkouts.create({
+  const result = await getPolar().checkouts.create({
     products: [getPolarProductId()],
-    successUrl: new URL("/billing/success", requestUrl).toString(),
+    successUrl: getBillingReturnUrl(),
     externalCustomerId: customerExternalId,
     metadata: { source: "nightcode-cli" },
   });
@@ -70,11 +82,10 @@ export async function createCheckoutUrl({
 
 export async function createCustomerPortalUrl({
   customerExternalId,
-  requestUrl,
 }: CreateCheckoutUrlParams) {
-  const result = await polar.customerSessions.create({
+  const result = await getPolar().customerSessions.create({
     externalCustomerId: customerExternalId,
-    returnUrl: new URL("/billing/success", requestUrl).toString(),
+    returnUrl: getBillingReturnUrl(),
   });
 
   return result.customerPortalUrl;
@@ -82,7 +93,7 @@ export async function createCustomerPortalUrl({
 
 export async function getAvailableCreditsBalance(customerExternalId: string) {
   try {
-    const customerState = await polar.customers.getStateExternal({
+    const customerState = await getPolar().customers.getStateExternal({
       externalId: customerExternalId,
     });
 
@@ -116,7 +127,7 @@ export async function ingestAiUsage({
     return;
   }
 
-  await polar.events.ingest({
+  await getPolar().events.ingest({
     events: [
       {
         name: "nightcode_usage",

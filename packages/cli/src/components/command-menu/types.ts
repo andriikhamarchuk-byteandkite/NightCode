@@ -9,6 +9,7 @@ export type CommandContext = {
   navigate: (path: string) => void;
   mode: ModeType;
   setMode: (mode: ModeType) => void;
+  model: SupportedChatModelId;
   setModel: (model: SupportedChatModelId) => void;
 };
 

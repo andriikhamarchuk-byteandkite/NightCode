@@ -17,10 +17,10 @@ Sections from the video, with source timestamps and time budgets (38h total):
 | 3  | Server, Shared Package & Database | 3:25:56   | 5h     | done    |
 | 4  | Sentry Monitoring                 | 5:08:06   | 1h     | done    |
 | 5  | AI Chat Streaming                 | 5:26:13   | 6h     | done    |
-| 6  | Session Management                | 7:04:20   | 4h     | review  |
-| 7  | Tool Calling                      | 7:39:58   | 5h     | review  |
-| 8  | Completing The User Experience    | 8:53:05   | 3h     | review  |
-| 9  | Usage Based Billing               | 10:02:57  | 2h     | todo    |
+| 6  | Session Management                | 7:04:20   | 4h     | done    |
+| 7  | Tool Calling                      | 7:39:58   | 5h     | done    |
+| 8  | Completing The User Experience    | 8:53:05   | 3h     | done    |
+| 9  | Usage Based Billing               | 10:02:57  | 2h     | done    |
 | 10 | Client-Side Tool Execution        | 10:36:27  | 5h     | review  |
 
 ## Tech stack
@@ -51,7 +51,7 @@ Copy `.env.example` to `.env` in the repo root and fill it in:
 
 | Variable                | Used by | Description |
 |-------------------------|---------|-------------|
-| `API_URL`               | CLI     | Server URL, default `http://localhost:3000` |
+| `API_URL`               | CLI, server | Server URL, default `http://localhost:3000`; the server also uses it for Polar return links |
 | `DATABASE_URL`          | server  | PostgreSQL connection string |
 | `SENTRY_DSN`            | server  | Sentry project DSN (optional) |
 | `ANTHROPIC_API_KEY`     | server  | Anthropic models |
@@ -151,17 +151,19 @@ Tools run in the CLI, on the user's machine, inside the directory the CLI was st
 
 | Tool            | Plan | Build | Approval | Limits |
 |-----------------|:----:|:-----:|:--------:|--------|
-| `readFile`      | yes  | yes   | no       | Path must stay inside the working directory; output truncated at 10,000 chars |
+| `readFile`      | yes  | yes   | no       | Path must stay inside the working directory; optional `offset`/`limit` line range; output truncated at 10,000 chars |
 | `listDirectory` | yes  | yes   | no       | Path must stay inside the working directory |
-| `grep`          | yes  | yes   | no       | Path must stay inside the working directory; max 50 matches |
-| `glob`          | yes  | yes   | no       | Path must stay inside the working directory; max 200 results |
+| `grep`          | yes  | yes   | no       | Path must stay inside the working directory; skips dot directories; max 50 matches |
+| `glob`          | yes  | yes   | no       | Pattern and results must stay inside the working directory; max 200 results |
 | `writeFile`     | no   | yes   | yes      | Path must stay inside the working directory |
 | `editFile`      | no   | yes   | yes      | Path must stay inside the working directory; `oldString` must match exactly once |
-| `bash`          | no   | yes   | yes      | Runs in the working directory; 30 s default timeout; output truncated at 20,000 chars |
+| `bash`          | no   | yes   | yes      | Runs in the working directory; 30 s default / 120 s max timeout; output truncated at 20,000 chars; env vars matching `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `DATABASE_URL` are removed |
 
-- **Approval:** before a write or shell tool runs, the CLI shows the tool name and its input. `y`/Enter allows it; `n`/Esc/Ctrl+C rejects it. A rejected call is returned to the model as an error, so it can try another way.
+- **Secret files:** `readFile`, `writeFile`, `editFile`, `glob` and `grep` skip `.env*` (except `.env.example`), `*.pem`, `id_rsa*` and anything under `.git`.
+
+- **Approval:** before a write or shell tool runs, the CLI shows the tool name and its input. Only `y` allows it (Enter does nothing, so typing cannot approve by accident); `n`/Esc/Ctrl+C rejects it. A `bash` command is always shown in full. A rejected call is returned to the model as an error, so it can try another way.
 - **Errors:** a failed tool (missing file, path outside the project, non-zero exit code) is returned to the model as its result, and the UI shows the error next to the call.
-- **Interrupt:** Esc during a turn stops the stream, kills a running `bash` command and closes pending tool calls as interrupted; the turn does not continue on its own.
+- **Interrupt:** Esc during a turn stops the stream, kills a running `bash` command with every process it started and closes pending tool calls as interrupted; the turn does not continue on its own.
 - **Plan** mode is read-only: the model only gets the read tools, and the CLI also refuses write and shell tools in Plan mode.
 - **Trust boundary:** the server keeps the conversation history. The CLI can only add a new user message or fill in results for tool calls that are still waiting; it cannot rewrite earlier messages.
 - On Windows, `bash` and `grep` come from Git for Windows (found through `git` on `PATH`), not from the WSL launcher in `System32`. The model is told the OS and to use POSIX commands.
@@ -189,12 +191,13 @@ Tools run in the CLI, on the user's machine, inside the directory the CLI was st
 
 ## Known limitations
 
-- `bash` is not sandboxed: once approved, a command can read or change anything the user can, and it gets the CLI's full environment, including `.env` values.
+- `bash` is not sandboxed: once approved, a command can read or change anything the user can. Only env var names that look like secrets are filtered out.
+- On Windows, a background process started by a `bash` command (e.g. `cmd &`) can survive a timeout or Esc: Git bash forks break the Windows process tree. The tool still returns after a short wait.
 - The file tools resolve paths without following symlinks, so a symlink inside the project can point outside it.
 - The `1_session_ui_messages` migration drops the old `Message` table: sessions created before it open with an empty history.
 - `/upgrade` and `/usage` show placeholder toasts; billing arrives in section 9.
 - The OAuth token is not refreshed: once it expires, the server returns 401, the CLI deletes the token, and you need to `/login` again.
-- `bun run dev:cli` reads `.env` from the current directory, so start it from the repo root; the `nightcode` command loads the repo's `.env` itself.
+- `bun run dev:cli` reads `.env` from the current directory, so start it from the repo root; the `nightcode` command reads only `API_URL`, `CLERK_FRONTEND_API` and `CLERK_OAUTH_CLIENT_ID` from the repo's `.env`.
 - Sessions created before auth (owned by `mock-user`) are no longer visible.
 - Theme preview also writes `~/.nightcode/preferences.json` on every highlighted theme (reverted on Esc).
 - Dependencies are newer than in the video (`@opentui/*` 0.5.x vs 0.1.x), so some APIs may differ from the recording.

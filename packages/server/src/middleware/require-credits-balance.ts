@@ -5,22 +5,9 @@ import { getAvailableCreditsBalance } from "../lib/polar";
 
 export const requireCreditsBalance = createMiddleware<AuthenticatedEnv>(
   async (c, next) => {
+    let creditsBalance: number;
     try {
-      const userId = c.get("userId");
-      const creditsBalance = await getAvailableCreditsBalance(userId);
-
-      if (creditsBalance <= 0) {
-        Sentry.logger.warn("Request blocked: no credits remaining", {
-          path: c.req.path,
-          creditsBalance,
-        });
-        return c.json(
-          { error: "No credits remaining. Run /upgrade to buy more credits." },
-          402,
-        );
-      }
-
-      await next();
+      creditsBalance = await getAvailableCreditsBalance(c.get("userId"));
     } catch (error) {
       Sentry.captureException(error);
       return c.json(
@@ -28,5 +15,19 @@ export const requireCreditsBalance = createMiddleware<AuthenticatedEnv>(
         503,
       );
     }
+
+    if (creditsBalance <= 0) {
+      Sentry.logger.warn("Request blocked: no credits remaining", {
+        path: c.req.path,
+        creditsBalance,
+      });
+      return c.json(
+        { error: "No credits remaining. Run /upgrade to buy more credits." },
+        402,
+      );
+    }
+
+    // Outside the try so route errors reach app.onError instead of becoming 503.
+    await next();
   },
 );

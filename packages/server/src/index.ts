@@ -14,6 +14,19 @@ dotenv.config({
   path: path.resolve(import.meta.dirname, "../../../.env"),
 });
 
+for (const name of [
+  "CLERK_SECRET_KEY",
+  "CLERK_PUBLISHABLE_KEY",
+  "POLAR_ACCESS_TOKEN",
+  "POLAR_PRODUCT_ID",
+  "POLAR_CREDITS_METER_ID",
+]) {
+  if (!process.env[name]) {
+    console.error(`${name} environment variable is required`);
+    process.exit(1);
+  }
+}
+
 const SENTRY_DSN = process.env.SENTRY_DSN;
 
 const app = new Hono();

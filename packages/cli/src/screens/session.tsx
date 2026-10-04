@@ -94,6 +94,11 @@ function SessionChat({
       inputDisabled={isBusy}
       loading={isBusy}
       interruptible={isBusy && !pendingApproval}
+      loadingMode={
+        isBusy
+          ? messages.findLast((m) => m.metadata?.mode)?.metadata?.mode
+          : undefined
+      }
     >
       {messages.map((msg) => (
         <ChatMessage key={msg.id} msg={msg} />

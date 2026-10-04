@@ -45,6 +45,7 @@ export const COMMANDS: Command[] = [
         children: (
           <ModelsDialogContent
             models={SUPPORTED_CHAT_MODELS.map((model) => model.id)}
+            currentModel={ctx.model}
             onSelectModel={ctx.setModel}
           />
         ),

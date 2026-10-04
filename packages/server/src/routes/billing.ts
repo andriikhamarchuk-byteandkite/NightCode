@@ -8,7 +8,6 @@ const app = new Hono<AuthenticatedEnv>()
     const userId = c.get("userId");
     const url = await createCheckoutUrl({
       customerExternalId: userId,
-      requestUrl: c.req.url,
     });
 
     Sentry.logger.info("Created credits checkout");
@@ -19,7 +18,6 @@ const app = new Hono<AuthenticatedEnv>()
     const userId = c.get("userId");
     const url = await createCustomerPortalUrl({
       customerExternalId: userId,
-      requestUrl: c.req.url,
     });
 
     Sentry.logger.info("Created billing portal session");
