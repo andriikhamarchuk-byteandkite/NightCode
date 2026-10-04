@@ -17,7 +17,7 @@ Sections from the video, with source timestamps and time budgets (38h total):
 | 3  | Server, Shared Package & Database | 3:25:56   | 5h     | done    |
 | 4  | Sentry Monitoring                 | 5:08:06   | 1h     | done    |
 | 5  | AI Chat Streaming                 | 5:26:13   | 6h     | done    |
-| 6  | Session Management                | 7:04:20   | 4h     | todo    |
+| 6  | Session Management                | 7:04:20   | 4h     | review  |
 | 7  | Tool Calling                      | 7:39:58   | 5h     | todo    |
 | 8  | Completing The User Experience    | 8:53:05   | 3h     | todo    |
 | 9  | Usage Based Billing               | 10:02:57  | 2h     | todo    |

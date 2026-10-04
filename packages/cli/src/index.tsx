@@ -3,7 +3,6 @@ import { createRoot } from "@opentui/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { RootLayout } from "./layouts/root-layout";
 import { RouteError } from "./layouts/route-error";
-import { DialogProvider } from "./providers/dialog";
 import { KeyboardLayerProvider } from "./providers/keyboard-layer";
 import { ThemeProvider } from "./providers/theme";
 import { ToastProvider } from "./providers/toast";
@@ -24,16 +23,15 @@ const router = createMemoryRouter([
   },
 ]);
 
-// Providers sit above the router so the route error screen stays themed
-// and Ctrl+C keeps working there.
+// Theme, toast and keyboard providers sit above the router so the route error
+// screen stays themed and Ctrl+C keeps working there. Dialog and prompt config
+// live in RootLayout because dialog content uses router hooks.
 function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
         <KeyboardLayerProvider>
-          <DialogProvider>
-            <RouterProvider router={router} />
-          </DialogProvider>
+          <RouterProvider router={router} />
         </KeyboardLayerProvider>
       </ToastProvider>
     </ThemeProvider>
