@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { DialogSearchList } from "../dialog-search-list";
 import { Mode } from "@nightcode/database/enums";
 import { useDialog } from "../../providers/dialog";
+import { getModeLabel } from "../../lib/mode";
 
 const AVAILABLE_MODES: Mode[] = [Mode.BUILD, Mode.PLAN];
 
@@ -9,10 +10,6 @@ type AgentsDialogContentProps = {
   currentMode: Mode;
   onSelectMode: (mode: Mode) => void;
 };
-
-function getModeLabel(mode: Mode) {
-  return mode === Mode.PLAN ? "Plan" : "Build";
-}
 
 export const AgentsDialogContent = ({
   currentMode,

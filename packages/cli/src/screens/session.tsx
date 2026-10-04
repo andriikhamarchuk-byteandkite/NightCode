@@ -55,7 +55,10 @@ function mapDbMessages(dbMessages: SessionData["messages"]): Message[] {
       ? parsedParts.data.map((p) =>
           p.type === "tool-call" ? { ...p, status: "done" as const } : p,
         )
-      : [];
+      : // Messages saved before parts existed only have content.
+        m.content
+        ? [{ type: "text", text: m.content }]
+        : [];
 
     return {
       id: m.id,
@@ -100,6 +103,9 @@ function SessionChat({ session }: { session: SessionData }) {
       inputDisabled={streaming.status === "streaming"}
       loading={streaming.status === "streaming"}
       interruptible={streaming.status === "streaming"}
+      loadingMode={
+        streaming.status === "streaming" ? streaming.mode : undefined
+      }
     >
       {messages.map((msg) => (
         <ChatMessage key={msg.id} msg={msg} />

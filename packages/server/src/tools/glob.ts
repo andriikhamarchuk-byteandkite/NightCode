@@ -1,4 +1,4 @@
-import { resolve, relative } from "path";
+import { resolve, relative, isAbsolute } from "path";
 import { tool } from "ai";
 import { z } from "zod";
 import { resolveInsideCwd } from "./resolve-path";
@@ -25,6 +25,11 @@ export function createGlobTool(cwd: string) {
         return { error: "Path is outside the project directory" };
       }
 
+      // Bun.Glob happily matches "../x" or "/x", so the pattern must stay inside too.
+      if (isAbsolute(pattern) || pattern.split(/[\\/]/).includes("..")) {
+        return { error: "Pattern must stay inside the project directory" };
+      }
+
       try {
         const glob = new Bun.Glob(pattern);
         const files: string[] = [];
@@ -35,7 +40,7 @@ export function createGlobTool(cwd: string) {
           dot: false,
           onlyFiles: true,
         })) {
-          if (match.includes("node_modules")) continue;
+          if (match.split(/[\\/]/).includes("node_modules")) continue;
 
           if (files.length >= MAX_RESULTS) {
             truncated = true;
@@ -43,6 +48,7 @@ export function createGlobTool(cwd: string) {
           }
 
           const absoluteMatch = resolve(resolved, match);
+          if (!resolveInsideCwd(cwd, absoluteMatch)) continue;
           files.push(relative(cwd, absoluteMatch));
         }
 
@@ -54,7 +60,7 @@ export function createGlobTool(cwd: string) {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { error: `Failed to glob:${message}` };
+        return { error: `Failed to glob: ${message}` };
       }
     },
   });

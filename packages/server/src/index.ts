@@ -14,6 +14,13 @@ dotenv.config({
   path: path.resolve(import.meta.dirname, "../../../.env"),
 });
 
+for (const name of ["CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY"]) {
+  if (!process.env[name]) {
+    console.error(`${name} environment variable is required`);
+    process.exit(1);
+  }
+}
+
 const SENTRY_DSN = process.env.SENTRY_DSN;
 
 const app = new Hono();

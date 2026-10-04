@@ -2,7 +2,7 @@ import { relative, dirname } from "path";
 import { writeFile, mkdir } from "fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveInsideCwd } from "./resolve-path";
+import { resolveInsideCwd, isSecretFile } from "./resolve-path";
 
 export function createWriteFileTool(cwd: string) {
   return tool({
@@ -17,6 +17,10 @@ export function createWriteFileTool(cwd: string) {
 
       if (!resolved) {
         return { error: "Path is outside the project directory" };
+      }
+
+      if (isSecretFile(resolved)) {
+        return { error: "Access to secret files is not allowed" };
       }
 
       try {

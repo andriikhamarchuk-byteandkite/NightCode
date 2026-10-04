@@ -1,5 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import type { ReactNode } from "react";
+import type { Mode } from "@nightcode/database/enums";
 import { InputBar } from "./input-bar";
 import { Spinner } from "./spinner";
 import { usePromptConfig } from "../providers/prompt-config";
@@ -10,6 +11,8 @@ type Props = {
   inputDisabled?: boolean;
   loading?: boolean;
   interruptible?: boolean;
+  // Mode of the in-flight request; falls back to the selected mode.
+  loadingMode?: Mode;
 };
 
 export function SessionShell({
@@ -18,6 +21,7 @@ export function SessionShell({
   inputDisabled = false,
   loading = false,
   interruptible = false,
+  loadingMode,
 }: Props) {
   const { mode } = usePromptConfig();
   return (
@@ -48,7 +52,7 @@ export function SessionShell({
         <box flexDirection="row" alignItems="center" gap={2}>
           {loading ? (
             <>
-              <Spinner mode={mode}></Spinner>
+              <Spinner mode={loadingMode ?? mode}></Spinner>
               {interruptible ? <text>esc to interrupt</text> : null}
             </>
           ) : null}

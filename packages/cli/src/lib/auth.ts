@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
+  chmodSync,
   unlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -30,6 +31,8 @@ export function saveAuth(data: AuthData) {
     mkdirSync(AUTH_DIR, { mode: 0o700 });
   }
   writeFileSync(AUTH_FILE, JSON.stringify(data), { mode: 0o600 });
+  // mode only applies when the file is created; an older file keeps its rights.
+  chmodSync(AUTH_FILE, 0o600);
 }
 
 export function clearAuth() {

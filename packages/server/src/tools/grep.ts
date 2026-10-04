@@ -1,7 +1,7 @@
 import { relative } from "path";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveInsideCwd } from "./resolve-path";
+import { resolveInsideCwd, SECRET_GREP_EXCLUDES } from "./resolve-path";
 
 const MAX_MATCHES = 50;
 
@@ -32,7 +32,8 @@ export function createGrepTool(cwd: string) {
           "-rn",
           "--color=never",
           "--exclude-dir=node_modules",
-          "--exclude-dir=.git",
+          "--exclude-dir=.*",
+          ...SECRET_GREP_EXCLUDES,
           "-E",
         ];
 
@@ -91,7 +92,7 @@ export function createGrepTool(cwd: string) {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { error: `Failed to search:${message}` };
+        return { error: `Failed to search: ${message}` };
       }
     },
   });
