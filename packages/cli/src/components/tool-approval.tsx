@@ -19,8 +19,10 @@ function formatToolName(name: string): string {
     .replace(/^./, (c) => c.toUpperCase());
 }
 
-function formatValue(value: unknown): string {
+function formatValue(name: string, value: unknown): string {
   const text = typeof value === "string" ? value : JSON.stringify(value);
+  // A shell command is shown in full: the dangerous part can be at the end.
+  if (name === "command") return text;
   return text.length > MAX_VALUE_LENGTH
     ? `${text.slice(0, MAX_VALUE_LENGTH)}… (${text.length} chars)`
     : text;
@@ -28,12 +30,12 @@ function formatValue(value: unknown): string {
 
 function formatInput(input: unknown): [string, string][] {
   if (input == null || typeof input !== "object") {
-    return [["input", formatValue(input)]];
+    return [["input", formatValue("input", input)]];
   }
 
   return Object.entries(input).map(([name, value]) => [
     name,
-    formatValue(value),
+    formatValue(name, value),
   ]);
 }
 
@@ -56,7 +58,9 @@ export function ToolApproval({ request, onRespond }: Props) {
   useKeyboard((key) => {
     if (!isTopLayer(LAYER_ID)) return;
 
-    if (key.name === "y" || key.name === "return" || key.name === "enter") {
+    // Only an explicit "y" allows: Enter could come from typing that was
+    // still going on when the prompt appeared.
+    if (key.name === "y") {
       key.preventDefault();
       onRespond(true);
     }

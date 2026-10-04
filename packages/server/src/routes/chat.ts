@@ -13,6 +13,7 @@ import {
 import { db } from "@nightcode/database/client";
 import type { Prisma } from "@nightcode/database";
 import {
+  MAX_MESSAGE_LENGTH,
   buildToolContracts,
   getToolContracts,
   modeSchema,
@@ -25,8 +26,6 @@ import { requireCreditsBalance } from "../middleware/require-credits-balance";
 import { calculateCreditsForUsage } from "../lib/credits";
 import { ingestAiUsage } from "../lib/polar";
 import { isSupportedChatModel, resolveChatModel } from "../lib/models";
-
-const MAX_MESSAGE_LENGTH = 20_000;
 
 // Each request runs a single model step; the client sends the next one after
 // it runs the requested tools. Once a turn reaches this many steps the model
@@ -87,9 +86,19 @@ const submitValidator = zValidator("json", submitSchema, (result, c) => {
   }
 });
 
-// Sessions with a request in progress. Released once the response messages
-// are persisted, so two requests never overwrite each other's messages.
-const activeStreamSessionIds = new Set<string>();
+// A lock older than this is treated as stale, in case onEnd never ran and
+// the session would otherwise stay locked until a restart.
+const SESSION_LOCK_TTL_MS = 10 * 60 * 1000;
+
+// Sessions with a request in progress, with the time the lock was taken.
+// Released once the response messages are persisted, so two requests never
+// overwrite each other's messages.
+const activeStreamSessionIds = new Map<string, number>();
+
+function isSessionLocked(sessionId: string) {
+  const lockedAt = activeStreamSessionIds.get(sessionId);
+  return lockedAt !== undefined && Date.now() - lockedAt < SESSION_LOCK_TTL_MS;
+}
 
 function isToolPart(part: MessagePart): part is ToolPart {
   return "toolCallId" in part;
@@ -213,11 +222,20 @@ const app = new Hono<AuthenticatedEnv>().post(
     const userId = c.get("userId");
     const { id, messages, mode, model, platform } = c.req.valid("json");
 
+    // Taken before the first await, so two parallel requests cannot both
+    // pass the check or read the same stored history. Every early return
+    // below releases it.
+    if (isSessionLocked(id)) {
+      return c.json({ error: "Session already has an active response" }, 409);
+    }
+    activeStreamSessionIds.set(id, Date.now());
+
     const session = await db.session.findUnique({
       where: { id, userId },
     });
 
     if (!session) {
+      activeStreamSessionIds.delete(id);
       return c.json({ error: "Session not found" }, 404);
     }
 
@@ -226,16 +244,23 @@ const app = new Hono<AuthenticatedEnv>().post(
         (m) => m.role === "user" && getTextLength(m) > MAX_MESSAGE_LENGTH,
       )
     ) {
+      activeStreamSessionIds.delete(id);
       return c.json({ error: "Message is too long" }, 400);
-    }
-
-    if (activeStreamSessionIds.has(id)) {
-      return c.json({ error: "Session already has an active response" }, 409);
     }
 
     const storedMessages = Array.isArray(session.messages)
       ? (session.messages as unknown as NightcodeUIMessage[])
       : [];
+    const storedIds = new Set(storedMessages.map((m) => m.id));
+
+    if (
+      messages.filter((m) => m.role === "user" && !storedIds.has(m.id))
+        .length > 1
+    ) {
+      activeStreamSessionIds.delete(id);
+      return c.json({ error: "Only one new message per request" }, 400);
+    }
+
     const mergedMessages = closePendingToolCalls(
       mergeClientMessages(storedMessages, messages, { mode, model }),
     );
@@ -249,11 +274,10 @@ const app = new Hono<AuthenticatedEnv>().post(
         tools: buildToolContracts,
       });
     } catch (error) {
+      activeStreamSessionIds.delete(id);
       Sentry.captureException(error, { extra: { sessionId: id } });
       return c.json({ error: "Invalid messages" }, 400);
     }
-
-    activeStreamSessionIds.add(id);
 
     try {
       const startTime = Date.now();
@@ -282,7 +306,8 @@ const app = new Hono<AuthenticatedEnv>().post(
 
       // Collected per step instead of from onFinish, which does not fire when
       // the request is aborted; steps that finished before the abort are
-      // still billed.
+      // still billed. The step cut off by the abort never reaches onStepEnd,
+      // so its tokens are not billed.
       const stepUsages: LanguageModelUsage[] = [];
       let streamError: string | undefined;
 

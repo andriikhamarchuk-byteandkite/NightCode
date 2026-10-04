@@ -1,6 +1,14 @@
 import { existsSync } from "fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "path";
 import { toolInputSchemas, Mode, type ModeType } from "@nightcode/shared";
 
 const MAX_FILE_SIZE = 10_000;
@@ -9,16 +17,70 @@ const MAX_MATCHES = 50;
 const MAX_OUTPUT = 20_000;
 const DEFAULT_TIMEOUT = 30_000;
 
+// Read-only tools run without approval and their output goes to the model,
+// so files that usually hold credentials are never read or written.
+const SECRET_FILE_PATTERN = /^(\.env(\..*)?|.*\.pem|id_rsa.*)$/;
+const SECRET_GREP_EXCLUDES = [
+  "--exclude=.env*",
+  "--exclude=*.pem",
+  "--exclude=id_rsa*",
+];
+
+// bin/nightcode loads the repo .env, so the server keys can be in this
+// process. The shell command must not see them.
+const SECRET_ENV_PATTERN = /KEY|TOKEN|SECRET|PASSWORD|DATABASE_URL/i;
+
+function isOutsideCwd(rel: string) {
+  return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
+
 function resolveInsideCwd(path: string) {
   const cwd = process.cwd();
   const resolved = resolve(cwd, path);
-  const rel = relative(cwd, resolved);
 
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  if (isOutsideCwd(relative(cwd, resolved))) {
     throw new Error("Path is outside the project directory");
   }
 
   return { cwd, resolved };
+}
+
+function isSecretPath(cwd: string, path: string) {
+  const name = basename(path);
+  const isSecretFile =
+    name !== ".env.example" && SECRET_FILE_PATTERN.test(name);
+  return isSecretFile || relative(cwd, path).split(sep).includes(".git");
+}
+
+function resolveAllowedFile(path: string) {
+  const result = resolveInsideCwd(path);
+  if (isSecretPath(result.cwd, result.resolved)) {
+    throw new Error("Access to secret files is not allowed");
+  }
+  return result;
+}
+
+function getSafeEnv() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) => !SECRET_ENV_PATTERN.test(name),
+    ),
+  );
+}
+
+// Kills the command together with everything it started. Killing only the
+// shell would leave e.g. a dev server running and holding the output pipes.
+function killProcessTree(pid: number) {
+  try {
+    if (process.platform === "win32") {
+      Bun.spawnSync(["taskkill", "/pid", String(pid), "/T", "/F"]);
+    } else {
+      // The shell is spawned detached, so it leads its own process group.
+      process.kill(-pid, "SIGKILL");
+    }
+  } catch {
+    // Already exited.
+  }
 }
 
 // git.exe lives in <root>\cmd, <root>\bin or <root>\mingw64\bin, so walk up
@@ -55,6 +117,19 @@ function getUnixTools() {
   return unixTools;
 }
 
+// Collects into an array instead of returning the text, so a caller that
+// stops waiting still gets the output read so far.
+async function collectText(
+  stream: ReadableStream<Uint8Array>,
+  chunks: string[],
+) {
+  const decoder = new TextDecoder();
+  for await (const chunk of stream) {
+    chunks.push(decoder.decode(chunk, { stream: true }));
+  }
+  chunks.push(decoder.decode());
+}
+
 function truncate(value: string, limit: number) {
   return value.length > limit
     ? `${value.slice(0, limit)}\n... (truncated, ${value.length} total chars)`
@@ -78,9 +153,19 @@ export async function executeLocalTool(
 
   switch (toolName) {
     case "readFile": {
-      const { path } = toolInputSchemas.readFile.parse(input);
-      const { resolved } = resolveInsideCwd(path);
-      const content = await readFile(resolved, "utf-8");
+      const { path, offset, limit } = toolInputSchemas.readFile.parse(input);
+      const { resolved } = resolveAllowedFile(path);
+      let content = await readFile(resolved, "utf-8");
+
+      // A line range lets the model read past the size limit in chunks.
+      if (offset !== undefined || limit !== undefined) {
+        const start = (offset ?? 1) - 1;
+        const lines = content.split("\n");
+        content = lines
+          .slice(start, limit === undefined ? undefined : start + limit)
+          .join("\n");
+      }
+
       return content.length > MAX_FILE_SIZE
         ? {
             content: content.slice(0, MAX_FILE_SIZE),
@@ -115,6 +200,9 @@ export async function executeLocalTool(
     }
     case "glob": {
       const { pattern, path } = toolInputSchemas.glob.parse(input);
+      if (isAbsolute(pattern) || pattern.split(/[\\/]/).includes("..")) {
+        throw new Error("Pattern must stay inside the project directory");
+      }
       const { cwd, resolved } = resolveInsideCwd(path);
       const glob = new Bun.Glob(pattern);
       const files: string[] = [];
@@ -125,12 +213,19 @@ export async function executeLocalTool(
         dot: false,
         onlyFiles: true,
       })) {
-        if (match.includes("node_modules")) continue;
+        if (match.split(/[\\/]/).includes("node_modules")) continue;
+        const absoluteMatch = resolve(resolved, match);
+        if (
+          isOutsideCwd(relative(cwd, absoluteMatch)) ||
+          isSecretPath(cwd, absoluteMatch)
+        ) {
+          continue;
+        }
         if (files.length >= MAX_RESULTS) {
           truncated = true;
           break;
         }
-        files.push(relative(cwd, resolve(resolved, match)));
+        files.push(relative(cwd, absoluteMatch));
       }
 
       files.sort();
@@ -143,7 +238,8 @@ export async function executeLocalTool(
         "-rn",
         "--color=never",
         "--exclude-dir=node_modules",
-        "--exclude-dir=.git",
+        "--exclude-dir=.*",
+        ...SECRET_GREP_EXCLUDES,
         "-E",
       ];
       if (include) args.push(`--include=${include}`);
@@ -191,7 +287,7 @@ export async function executeLocalTool(
     }
     case "writeFile": {
       const { path, content } = toolInputSchemas.writeFile.parse(input);
-      const { cwd, resolved } = resolveInsideCwd(path);
+      const { cwd, resolved } = resolveAllowedFile(path);
       await mkdir(dirname(resolved), { recursive: true });
       await writeFile(resolved, content, "utf-8");
       return {
@@ -203,7 +299,7 @@ export async function executeLocalTool(
     case "editFile": {
       const { path, oldString, newString } =
         toolInputSchemas.editFile.parse(input);
-      const { cwd, resolved } = resolveInsideCwd(path);
+      const { cwd, resolved } = resolveAllowedFile(path);
       const content = await readFile(resolved, "utf-8");
       const occurrences = content.split(oldString).length - 1;
 
@@ -211,7 +307,7 @@ export async function executeLocalTool(
       if (occurrences > 1)
         throw new Error(`oldString is ambiguous; found ${occurrences} matches`);
 
-      await writeFile(resolved, content.replace(oldString, newString), "utf-8");
+      await writeFile(resolved, content.replace(oldString, () => newString), "utf-8");
       return { success: true as const, path: relative(cwd, resolved) };
     }
     case "bash": {
@@ -221,22 +317,39 @@ export async function executeLocalTool(
         cwd: resolveInsideCwd(".").resolved,
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, TERM: "dumb" },
+        env: { ...getSafeEnv(), TERM: "dumb" },
+        detached: process.platform !== "win32",
       });
-      const timer = setTimeout(() => proc.kill(), timeout);
-      const killOnAbort = () => proc.kill();
-      signal?.addEventListener("abort", killOnAbort, { once: true });
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
+      let killed = false;
+      let timedOut = false;
+      const kill = () => {
+        killed = true;
+        killProcessTree(proc.pid);
+      };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        kill();
+      }, timeout);
+      signal?.addEventListener("abort", kill, { once: true });
+
+      const stdoutChunks: string[] = [];
+      const stderrChunks: string[] = [];
+      const output = Promise.all([
+        collectText(proc.stdout, stdoutChunks),
+        collectText(proc.stderr, stderrChunks),
       ]);
       const exitCode = await proc.exited;
+      // On Windows Git bash forks break the process tree, so a background
+      // child can survive the kill and keep the pipes open. After a kill the
+      // output is waited for only briefly, so the tool still returns.
+      await (killed ? Promise.race([output, Bun.sleep(1000)]) : output);
       clearTimeout(timer);
-      signal?.removeEventListener("abort", killOnAbort);
+      signal?.removeEventListener("abort", kill);
       return {
-        stdout: truncate(stdout, MAX_OUTPUT),
-        stderr: truncate(stderr, MAX_OUTPUT),
+        stdout: truncate(stdoutChunks.join(""), MAX_OUTPUT),
+        stderr: truncate(stderrChunks.join(""), MAX_OUTPUT),
         exitCode,
+        ...(timedOut ? { timedOut: true } : {}),
       };
     }
     default:

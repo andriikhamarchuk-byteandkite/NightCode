@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { tool } from "ai";
 
+export const MAX_MESSAGE_LENGTH = 20_000;
+
+export const MAX_BASH_TIMEOUT = 120_000;
+
 export const Mode = {
   BUILD: "BUILD",
   PLAN: "PLAN",
@@ -13,6 +17,18 @@ export type ModeType = (typeof Mode)[keyof typeof Mode];
 export const toolInputSchemas = {
   readFile: z.object({
     path: z.string().describe("Relative path to the file to read"),
+    offset: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("1-based line number to start reading from"),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Maximum number of lines to read"),
   }),
   listDirectory: z.object({
     path: z.string().default(".").describe("Relative directory path to list"),
@@ -44,7 +60,13 @@ export const toolInputSchemas = {
       .string()
       .optional()
       .describe("Short description of the command"),
-    timeout: z.number().optional().describe("Timeout in milliseconds"),
+    timeout: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_BASH_TIMEOUT)
+      .optional()
+      .describe("Timeout in milliseconds"),
   }),
 } as const;
 
