@@ -5,11 +5,13 @@ import type { SupportedChatModelId } from "@nightcode/shared";
 
 type ModelsDialogContentProps = {
   models: SupportedChatModelId[];
+  currentModel: SupportedChatModelId;
   onSelectModel: (modelId: SupportedChatModelId) => void;
 };
 
 export const ModelsDialogContent = ({
   models,
+  currentModel,
   onSelectModel,
 }: ModelsDialogContentProps) => {
   const dialog = useDialog();
@@ -31,6 +33,7 @@ export const ModelsDialogContent = ({
       }
       renderItem={(modelId, isSelected) => (
         <text selectable={false} fg={isSelected ? "black" : "white"}>
+          {modelId === currentModel ? " • " : "   "}
           {modelId}
         </text>
       )}

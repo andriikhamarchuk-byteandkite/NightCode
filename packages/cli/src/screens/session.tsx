@@ -100,6 +100,9 @@ function SessionChat({ session }: { session: SessionData }) {
       inputDisabled={streaming.status === "streaming"}
       loading={streaming.status === "streaming"}
       interruptible={streaming.status === "streaming"}
+      loadingMode={
+        streaming.status === "streaming" ? streaming.mode : undefined
+      }
     >
       {messages.map((msg) => (
         <ChatMessage key={msg.id} msg={msg} />

@@ -92,7 +92,7 @@ export const SessionsDialogContent = () => {
             fg={isSelected ? "black" : undefined}
             attributes={TextAttributes.DIM}
           >
-            {format(new Date(session.createdAt), "hh:mm a")}
+            {format(new Date(session.createdAt), "MMM d, HH:mm")}
           </text>
         </>
       )}

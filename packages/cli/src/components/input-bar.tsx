@@ -12,7 +12,6 @@ import {
 } from "@opentui/core";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import type { KeyBinding } from "@opentui/core";
-import { Mode } from "@nightcode/database/enums";
 import { StatusBar } from "./status-bar";
 import { useCommandMenu } from "./command-menu/use-command-menu";
 import type { Command } from "./command-menu/types";
@@ -25,6 +24,7 @@ import { useNavigate } from "react-router";
 import { usePromptConfig } from "../providers/prompt-config";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { readdir } from "node:fs/promises";
+import { getModeColor } from "../lib/mode";
 
 const MAX_VISIBLE_MENTIONS = 8;
 const CURRENT_DIRECTORY = process.cwd();
@@ -300,7 +300,7 @@ type Props = {
 };
 
 export function InputBar({ onSubmit, disabled = false }: Props) {
-  const { mode, toggleMode, setMode, setModel } = usePromptConfig();
+  const { mode, toggleMode, setMode, model, setModel } = usePromptConfig();
   const textareaRef = useRef<TextareaRenderable>(null);
   const onSubmitRef = useRef<() => void>(() => {});
   const activeMentionRef = useRef<MentionMatch | null>(null);
@@ -413,13 +413,14 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
           navigate,
           mode,
           setMode,
+          model,
           setModel,
         });
       } else {
         textarea.insertText(command.value + " ");
       }
     },
-    [renderer, toast, dialog, navigate, mode, setMode, setModel],
+    [renderer, toast, dialog, navigate, mode, setMode, model, setModel],
   );
 
   const handleCommandExecute = useCallback(
@@ -580,7 +581,7 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
     <box width="100%" alignItems="center">
       <box
         border={["left"]}
-        borderColor={mode === Mode.BUILD ? colors.primary : colors.planMode}
+        borderColor={getModeColor(mode, colors)}
         width="100%"
       >
         <box
