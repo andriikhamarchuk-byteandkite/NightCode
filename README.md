@@ -195,7 +195,6 @@ Tools run in the CLI, on the user's machine, inside the directory the CLI was st
 - On Windows, a background process started by a `bash` command (e.g. `cmd &`) can survive a timeout or Esc: Git bash forks break the Windows process tree. The tool still returns after a short wait.
 - The file tools resolve paths without following symlinks, so a symlink inside the project can point outside it.
 - The `1_session_ui_messages` migration drops the old `Message` table: sessions created before it open with an empty history.
-- `/upgrade` and `/usage` show placeholder toasts; billing arrives in section 9.
 - The OAuth token is not refreshed: once it expires, the server returns 401, the CLI deletes the token, and you need to `/login` again.
 - `bun run dev:cli` reads `.env` from the current directory, so start it from the repo root; the `nightcode` command reads only `API_URL`, `CLERK_FRONTEND_API` and `CLERK_OAUTH_CLIENT_ID` from the repo's `.env`.
 - Sessions created before auth (owned by `mock-user`) are no longer visible.
