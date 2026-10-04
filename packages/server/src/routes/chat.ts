@@ -123,6 +123,8 @@ async function streamAIResponse(
 
   // Collected per step instead of from onFinish, which does not fire when the
   // turn is aborted; steps that finished before the abort are still billed.
+  // The step cut off by the abort never reaches onStepEnd, so its tokens are
+  // not billed.
   const stepUsages: LanguageModelUsage[] = [];
 
   // Persisted even when empty, so an interrupted turn never looks like a
@@ -178,7 +180,6 @@ async function streamAIResponse(
 
   const persistInterruptedMessageAndUsage = async () => {
     const interruptedMessage = await persistInterruptedMessage();
-    if (!interruptedMessage) return;
 
     await ingestUsageForMessage({
       messageId: interruptedMessage.id,
@@ -355,7 +356,7 @@ async function streamAIResponse(
 }
 
 const app = new Hono<AuthenticatedEnv>()
-  .post("/:sessionId/resume", async (c) => {
+  .post("/:sessionId/resume", requireCreditsBalance, async (c) => {
     const sessionId = c.req.param("sessionId");
     const userId = c.get("userId");
 

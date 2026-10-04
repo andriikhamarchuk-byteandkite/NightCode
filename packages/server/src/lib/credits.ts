@@ -4,6 +4,7 @@ import {
   type ModelPricing,
 } from "@nightcode/shared";
 import type { LanguageModelUsage } from "ai";
+import * as Sentry from "@sentry/hono/bun";
 
 type CalculateCreditsForUsageParams = {
   provider: string;
@@ -38,7 +39,13 @@ function getStepTokenCounts(usage: LanguageModelUsage): TokenCounts {
     inputTokens < 0 ||
     outputTokens < 0
   ) {
-    throw new Error("Credit conversion requires input and output token counts");
+    // Some providers send no usage for a failed or cut-off step. Count it as 0
+    // so the other steps of the turn are still billed.
+    Sentry.logger.warn("Step usage has no valid token counts", {
+      inputTokens: String(inputTokens),
+      outputTokens: String(outputTokens),
+    });
+    return { inputTokens: 0, outputTokens: 0 };
   }
 
   return {

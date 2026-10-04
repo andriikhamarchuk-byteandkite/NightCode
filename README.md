@@ -51,7 +51,7 @@ Copy `.env.example` to `.env` in the repo root and fill it in:
 
 | Variable                | Used by | Description |
 |-------------------------|---------|-------------|
-| `API_URL`               | CLI     | Server URL, default `http://localhost:3000` |
+| `API_URL`               | CLI, server | Server URL, default `http://localhost:3000`; the server also uses it for Polar return links |
 | `DATABASE_URL`          | server  | PostgreSQL connection string |
 | `SENTRY_DSN`            | server  | Sentry project DSN (optional) |
 | `ANTHROPIC_API_KEY`     | server  | Anthropic models |
