@@ -25,12 +25,15 @@ export function createBashTool(cwd: string) {
       command: z.string().describe("The shell command to execute"),
       timeout: z
         .number()
+        .int()
+        .positive()
         .max(MAX_TIMEOUT)
         .describe("Timeout in milliseconds (default: 30000, max: 120000)")
         .default(DEFAULT_TIMEOUT),
     }),
     execute: async ({ command, timeout }) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let timedOut = false;
 
       try {
         const proc = Bun.spawn(["bash", "-c", command], {
@@ -41,6 +44,7 @@ export function createBashTool(cwd: string) {
         });
 
         timer = setTimeout(() => {
+          timedOut = true;
           proc.kill();
         }, timeout);
 
@@ -60,6 +64,7 @@ export function createBashTool(cwd: string) {
           stdout: truncate(stdout),
           stderr: truncate(stderr),
           exitCode,
+          ...(timedOut ? { timedOut: true } : {}),
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

@@ -1,7 +1,7 @@
 import { readFile } from "fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveInsideCwd } from "./resolve-path";
+import { resolveInsideCwd, isSecretFile } from "./resolve-path";
 
 const MAX_FILE_SIZE = 10_000;
 
@@ -17,6 +17,10 @@ export function createReadFileTool(cwd: string) {
 
       if (!resolved) {
         return { error: "Path is outside the project directory" };
+      }
+
+      if (isSecretFile(resolved)) {
+        return { error: "Access to secret files is not allowed" };
       }
 
       try {

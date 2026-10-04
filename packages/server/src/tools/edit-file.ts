@@ -2,7 +2,7 @@ import { relative } from "path";
 import { readFile, writeFile } from "fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveInsideCwd } from "./resolve-path";
+import { resolveInsideCwd, isSecretFile } from "./resolve-path";
 
 export function createEditFileTool(cwd: string) {
   return tool({
@@ -22,6 +22,10 @@ export function createEditFileTool(cwd: string) {
         return { error: "Path is outside the project directory" };
       }
 
+      if (isSecretFile(resolved)) {
+        return { error: "Access to secret files is not allowed" };
+      }
+
       try {
         const content = await readFile(resolved, "utf-8");
 
@@ -37,7 +41,8 @@ export function createEditFileTool(cwd: string) {
           };
         }
 
-        const updated = content.replace(oldString, newString);
+        // A function replacement keeps "$&", "$1" etc. in newString literal.
+        const updated = content.replace(oldString, () => newString);
 
         await writeFile(resolved, updated, "utf-8");
 

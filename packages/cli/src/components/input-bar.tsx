@@ -29,6 +29,8 @@ import { getModeColor } from "../lib/mode";
 const MAX_VISIBLE_MENTIONS = 8;
 const CURRENT_DIRECTORY = process.cwd();
 const MAX_FALLBACK_MENTION_CANDIDATES = 32;
+const MAX_MENTION_SCAN_DEPTH = 6;
+const MAX_MENTION_SCAN_ENTRIES = 5000;
 const MENTION_QUERY_CHARACTER = /[A-Za-z0-9._/-]/;
 const RECURSIVE_MENTION_IGNORED_DIRECTORIES = new Set(["node_modules"]);
 
@@ -172,13 +174,25 @@ async function getMentionCandidates(
     }
 
     const fallbackMatches: MentionCandidate[] = [];
+    // A prefix with no matches would otherwise walk the whole tree on every keystroke.
+    let visitedEntries = 0;
     const visit = async (
       absoluteDirectory: string,
       directoryPart: string,
+      depth: number,
     ): Promise<void> => {
-      const entries = await readdir(absoluteDirectory, { withFileTypes: true });
+      if (depth > MAX_MENTION_SCAN_DEPTH) return;
+
+      let entries;
+      try {
+        entries = await readdir(absoluteDirectory, { withFileTypes: true });
+      } catch {
+        // e.g. EACCES on one folder: skip it, keep matches from the others.
+        return;
+      }
 
       for (const entry of entries) {
+        if (++visitedEntries > MAX_MENTION_SCAN_ENTRIES) return;
         if (!showHiddenEntries && entry.name.startsWith(".")) {
           continue;
         }
@@ -208,7 +222,7 @@ async function getMentionCandidates(
         }
 
         if (entry.isDirectory()) {
-          await visit(resolve(absoluteDirectory, entry.name), path);
+          await visit(resolve(absoluteDirectory, entry.name), path, depth + 1);
           if (fallbackMatches.length >= MAX_FALLBACK_MENTION_CANDIDATES) {
             return;
           }
@@ -216,7 +230,7 @@ async function getMentionCandidates(
       }
     };
 
-    await visit(CURRENT_DIRECTORY, "");
+    await visit(CURRENT_DIRECTORY, "", 0);
     return fallbackMatches.sort((left, right) =>
       left.path.localeCompare(right.path),
     );
@@ -457,8 +471,9 @@ export function InputBar({ onSubmit, disabled = false }: Props) {
       const candidate = mentionCandidates[mentionSelectedIndex];
       if (candidate) {
         handleMentionExecute(mentionSelectedIndex);
-        return;
       }
+      // No candidates (or still loading): don't send a half-typed @mention.
+      return;
     }
 
     handleSubmit();
