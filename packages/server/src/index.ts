@@ -7,13 +7,20 @@ import * as path from "node:path";
 import sessions from "./routes/sessions";
 import chat from "./routes/chat";
 import auth from "./routes/auth";
+import billing from "./routes/billing";
 import { requireAuth } from "./middleware/require-auth";
 
 dotenv.config({
   path: path.resolve(import.meta.dirname, "../../../.env"),
 });
 
-for (const name of ["CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY"]) {
+for (const name of [
+  "CLERK_SECRET_KEY",
+  "CLERK_PUBLISHABLE_KEY",
+  "POLAR_ACCESS_TOKEN",
+  "POLAR_PRODUCT_ID",
+  "POLAR_CREDITS_METER_ID",
+]) {
   if (!process.env[name]) {
     console.error(`${name} environment variable is required`);
     process.exit(1);
@@ -63,11 +70,14 @@ app.onError((error, c) => {
 
 app.use("/sessions/*", requireAuth);
 app.use("/chat/*", requireAuth);
+app.use("/billing/checkout", requireAuth);
+app.use("/billing/portal", requireAuth);
 
 const routes = app
   .route("/sessions", sessions)
   .route("/chat", chat)
-  .route("/auth", auth);
+  .route("/auth", auth)
+  .route("/billing", billing);
 
 export type AppType = typeof routes;
 

@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { streamText as aiStreamText, stepCountIs } from "ai";
+import * as Sentry from "@sentry/hono/bun";
+import {
+  streamText as aiStreamText,
+  stepCountIs,
+  type LanguageModelUsage,
+} from "ai";
 import { db } from "@nightcode/database/client";
 import { Mode, MessageStatus } from "@nightcode/database/enums";
 import {
@@ -17,6 +22,9 @@ import type { Prisma } from "@nightcode/database";
 import { createTools } from "../tools";
 import { buildSystemPrompt } from "../system-prompt";
 import type { AuthenticatedEnv } from "../middleware/require-auth";
+import { calculateCreditsForUsage } from "../lib/credits";
+import { ingestAiUsage } from "../lib/polar";
+import { requireCreditsBalance } from "../middleware/require-credits-balance";
 
 const submitSchema = z.object({
   content: z.string().max(MAX_MESSAGE_LENGTH),
@@ -70,11 +78,17 @@ function getResumableUserMessage(
 
 type StreamParams = {
   sessionId: string;
+  userId: string;
   model: string;
   cwd: string | null;
   history: { role: "user" | "assistant"; content: string }[];
   mode: Mode;
   abortController: AbortController;
+};
+
+type IngestUsageForMessageParams = {
+  messageId: string;
+  status: "complete" | "interrupted";
 };
 
 function getErrorText(err: unknown): string {
@@ -100,18 +114,25 @@ async function streamAIResponse(
   stream: Parameters<Parameters<typeof streamSSE>[1]>[0],
   params: StreamParams,
 ) {
-  const { sessionId, model, history, cwd, mode, abortController } = params;
+  const { sessionId, userId, model, history, cwd, mode, abortController } =
+    params;
   const startTime = Date.now();
   const resolvedModel = resolveChatModel(model);
   const parts: MessagePart[] = [];
   const tools = cwd ? createTools(cwd, mode) : undefined;
+
+  // Collected per step instead of from onFinish, which does not fire when the
+  // turn is aborted; steps that finished before the abort are still billed.
+  // The step cut off by the abort never reaches onStepEnd, so its tokens are
+  // not billed.
+  const stepUsages: LanguageModelUsage[] = [];
 
   // Persisted even when empty, so an interrupted turn never looks like a
   // pending user message that auto-resume would regenerate.
   const persistInterruptedMessage = async () => {
     const elapsedMs = Date.now() - startTime;
 
-    await db.message.create({
+    return db.message.create({
       data: {
         sessionId,
         role: "ASSISTANT",
@@ -124,6 +145,48 @@ async function streamAIResponse(
     });
   };
 
+  const ingestUsageForMessage = async ({
+    messageId,
+    status,
+  }: IngestUsageForMessageParams) => {
+    if (stepUsages.length === 0) return;
+
+    try {
+      const billableUsage = calculateCreditsForUsage({
+        provider: resolvedModel.provider,
+        model: resolvedModel.modelId,
+        stepUsages,
+      });
+
+      await ingestAiUsage({
+        externalCustomerId: userId,
+        eventId: `chat-message:${messageId}`,
+        credits: billableUsage.credits,
+      });
+
+      Sentry.logger.info("Ingested AI usage", {
+        sessionId,
+        messageId,
+        status,
+        credits: billableUsage.credits,
+      });
+    } catch (error) {
+      console.error("Failed to ingest Polar AI usage for chat message", error);
+      Sentry.captureException(error, {
+        extra: { sessionId, messageId, status },
+      });
+    }
+  };
+
+  const persistInterruptedMessageAndUsage = async () => {
+    const interruptedMessage = await persistInterruptedMessage();
+
+    await ingestUsageForMessage({
+      messageId: interruptedMessage.id,
+      status: "interrupted",
+    });
+  };
+
   try {
     const result = aiStreamText({
       model: resolvedModel.model,
@@ -133,6 +196,9 @@ async function streamAIResponse(
       stopWhen: tools ? stepCountIs(50) : undefined,
       abortSignal: abortController.signal,
       providerOptions: resolvedModel.providerOptions,
+      onStepEnd(step) {
+        stepUsages.push(step.usage);
+      },
     });
 
     for await (const part of result.stream) {
@@ -230,7 +296,7 @@ async function streamAIResponse(
     }
 
     if (stream.aborted || abortController.signal.aborted) {
-      await persistInterruptedMessage();
+      await persistInterruptedMessageAndUsage();
       return;
     }
 
@@ -255,16 +321,22 @@ async function streamAIResponse(
     };
 
     await stream.writeSSE({ event: "done", data: JSON.stringify(doneEvent) });
+
+    // After "done" so Polar latency does not delay the end of the reply.
+    await ingestUsageForMessage({
+      messageId: assistantMessage.id,
+      status: "complete",
+    });
   } catch (err) {
     if (abortController.signal.aborted) {
-      await persistInterruptedMessage();
+      await persistInterruptedMessageAndUsage();
       return;
     }
 
     const message = getErrorText(err);
 
     if (parts.length > 0) {
-      await persistInterruptedMessage();
+      await persistInterruptedMessageAndUsage();
     }
 
     await db.message.create({
@@ -284,7 +356,7 @@ async function streamAIResponse(
 }
 
 const app = new Hono<AuthenticatedEnv>()
-  .post("/:sessionId/resume", async (c) => {
+  .post("/:sessionId/resume", requireCreditsBalance, async (c) => {
     const sessionId = c.req.param("sessionId");
     const userId = c.get("userId");
 
@@ -339,6 +411,7 @@ const app = new Hono<AuthenticatedEnv>()
           try {
             await streamAIResponse(stream, {
               sessionId,
+              userId,
               model: resumableMessage.model,
               history,
               cwd: session.cwd,
@@ -364,7 +437,7 @@ const app = new Hono<AuthenticatedEnv>()
       throw error;
     }
   })
-  .post("/:sessionId", submitValidator, async (c) => {
+  .post("/:sessionId", submitValidator, requireCreditsBalance, async (c) => {
     const sessionId = c.req.param("sessionId");
     const userId = c.get("userId");
 
@@ -423,6 +496,7 @@ const app = new Hono<AuthenticatedEnv>()
           try {
             await streamAIResponse(stream, {
               sessionId,
+              userId,
               model: data.model,
               history,
               cwd: session.cwd,
