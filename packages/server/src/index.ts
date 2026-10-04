@@ -6,10 +6,19 @@ import dotenv from "dotenv";
 import * as path from "node:path";
 import sessions from "./routes/sessions";
 import chat from "./routes/chat";
+import auth from "./routes/auth";
+import { requireAuth } from "./middleware/require-auth";
 
 dotenv.config({
   path: path.resolve(import.meta.dirname, "../../../.env"),
 });
+
+for (const name of ["CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY"]) {
+  if (!process.env[name]) {
+    console.error(`${name} environment variable is required`);
+    process.exit(1);
+  }
+}
 
 const SENTRY_DSN = process.env.SENTRY_DSN;
 
@@ -52,7 +61,13 @@ app.onError((error, c) => {
   return c.json({ error: "Internal server error" }, 500);
 });
 
-const routes = app.route("/sessions", sessions).route("/chat", chat);
+app.use("/sessions/*", requireAuth);
+app.use("/chat/*", requireAuth);
+
+const routes = app
+  .route("/sessions", sessions)
+  .route("/chat", chat)
+  .route("/auth", auth);
 
 export type AppType = typeof routes;
 
