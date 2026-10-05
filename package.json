@@ -12,7 +12,8 @@
     "link:cli": "cd packages/cli && bun link",
     "postinstall": "bun run --cwd packages/database db:generate",
     "typecheck": "tsc --noEmit && bun run --cwd packages/cli typecheck && bun run --cwd packages/server typecheck && bun run --cwd packages/shared typecheck && bun run --cwd packages/database typecheck",
-    "test": "bun test"
+    "test": "bun test",
+    "metrics:ci": "bun scripts/ci-metrics.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",
