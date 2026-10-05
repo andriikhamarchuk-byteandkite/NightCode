@@ -1,0 +1,7 @@
+{
+  "name": "adds-test-and-verifies",
+  "why": "A real task: Claude adds a test, follows 'Verifying your work', and leaves the suite green.",
+  "prompt": "In packages/shared/src/schemas.test.ts add a test that modeSchema rejects the lowercase value \"build\". Do not change any other file. Verify your work as CLAUDE.md requires.",
+  "allowedTools": "Read,Edit,Bash(bun test:*),Bash(bun run typecheck)",
+  "check": "git diff --name-only | grep -qx 'packages/shared/src/schemas.test.ts' && [ \"$(git diff --name-only | wc -l)\" -eq 1 ] && grep -q '\"build\"' packages/shared/src/schemas.test.ts && bun test packages/shared"
+}
