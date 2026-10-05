@@ -13,10 +13,17 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # Explicit bash turns on pipefail, so `| tee` keeps a failing exit code.
+    shell: bash
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,12 +34,36 @@ jobs:
       # postinstall runs `prisma generate`, which needs no database. The empty
       # value stops prisma.config.ts from reading a real URL from anywhere.
       - name: Install
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile 2>&1 | tee -a ci.log
         env:
           DATABASE_URL: ""
 
       - name: Typecheck
-        run: bun run typecheck
+        run: bun run typecheck 2>&1 | tee -a ci.log
 
       - name: Test
-        run: bun test
+        run: bun test 2>&1 | tee -a ci.log
+
+      # Judgment, not a gate: the job stays red whatever this says. Claude can
+      # only read the log, so it cannot change, rerun or push anything.
+      - name: Triage failure
+        if: failure() && env.HAS_KEY == 'true'
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          bun install -g @anthropic-ai/claude-code
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.bun/bin:$PATH"
+          # The end of the log holds the failure; this also bounds the cost.
+          tail -n 300 ci.log > ci-tail.log
+          {
+            echo "### Failure triage (AI, informational)"
+            echo
+            claude -p "Read ci-tail.log: the tail of a failed CI run (bun install, then bun run typecheck, then bun test) for a Bun + TypeScript monorepo. Reply with exactly three lines and nothing else:
+          Cause: <failing step, file:line if present, and the first real error in plain words>
+          Kind: <real | flaky | infra>, with a few words why
+          Next: <the concrete fix, or 'rerun' only if flaky or infra>" \
+              --allowedTools "Read" --max-turns 3 --output-format text
+          } >> "$GITHUB_STEP_SUMMARY"
