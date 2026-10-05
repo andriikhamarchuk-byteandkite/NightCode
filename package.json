@@ -11,7 +11,11 @@
     "start": "bun run packages/server/src/index.ts",
     "link:cli": "cd packages/cli && bun link",
     "postinstall": "bun run --cwd packages/database db:generate",
-    "typecheck": "bun run --cwd packages/cli typecheck && bun run --cwd packages/server typecheck && bun run --cwd packages/shared typecheck && bun run --cwd packages/database typecheck",
+    "typecheck": "tsc --noEmit && bun run --cwd packages/cli typecheck && bun run --cwd packages/server typecheck && bun run --cwd packages/shared typecheck && bun run --cwd packages/database typecheck",
     "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "typescript": "^5.9.3"
   }
 }

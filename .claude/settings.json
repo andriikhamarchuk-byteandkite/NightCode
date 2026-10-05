@@ -17,5 +17,18 @@
       "Bash(git push --force:*)",
       "Bash(rm -rf:*)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/approval-gate.ts\""
+          }
+        ]
+      }
+    ]
   }
 }

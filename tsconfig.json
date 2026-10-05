@@ -1,0 +1,6 @@
+{
+  // Repo tooling outside the packages: Claude Code hooks, scripts and their tests.
+  // Each package keeps its own tsconfig; this one only covers the root.
+  "extends": "./tsconfig.base.json",
+  "include": [".claude/hooks/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+}

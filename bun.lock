@@ -4,6 +4,10 @@
   "workspaces": {
     "": {
       "name": "nightcode",
+      "devDependencies": {
+        "@types/bun": "1.3.14",
+        "typescript": "^5.9.3",
+      },
     },
     "packages/cli": {
       "name": "@nightcode/cli",
