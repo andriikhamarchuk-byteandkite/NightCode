@@ -11,41 +11,61 @@ export type ToolCall = {
 type Env = Record<string, string | undefined>;
 
 // Same secret files the agent tools refuse (cli/src/lib/local-tools.ts).
-// The deny-list blocks Read(.env), but not `cat .env` through Bash.
+// The deny-list blocks Read(.env), but not `cat .env` through Bash. Glob
+// characters count as a boundary too, so `cat .env*` is caught.
 const SECRET_FILE =
-  /(^|[\s/\\'"=<>(|;&])(\.env(?!\.example\b)(\.[\w.-]+)?|[\w.-]*\.pem|id_rsa[\w.-]*)(?=$|[\s'")|;&>])/;
+  /(^|[\s/\\'"=<>(|;&])(\.env(?!\.example\b)(\.[\w.-]+)?|[\w.-]*\.pem|id_rsa[\w.-]*)(?=$|[\s'")|;&>*?[\]])/;
 
 const MIGRATION =
   /\bprisma\s+(migrate\s+(deploy|dev|reset|resolve)|db\s+push)\b|\bdb:migrate/;
-const GIT_PUSH = /\bgit\s+push\b/;
-const PROTECTED_BRANCH = /(^|[\s:])(main|master)(\s|$)/;
+const PROTECTED_BRANCHES = ["main", "master"];
 const PROD_DEPLOY =
   /\bdeploy\b.*\bprod(uction)?\b|\bprod(uction)?\b.*\bdeploy\b|--prod\b/;
 const TEST_FILE = /\.test\.tsx?$/;
 
 // The gates themselves: if the agent could edit these, it could switch a gate
-// off or set RELEASE_APPROVAL through settings `env`. Humans edit them by hand.
-const GUARD_CONFIG =
-  /(^|[\s/'"=<>(|;&])\.claude\/(hooks\/|agents\/|settings(\.local)?\.json)/;
+// off or set RELEASE_APPROVAL through settings `env`. bunfig.toml is here
+// because a `preload` in it runs before this hook and could exit 0 early.
+// Humans edit all of them by hand.
+const GUARD_PATH = String.raw`(\.claude[\\/](hooks[\\/]|agents[\\/]|settings)|\.?bunfig\.toml)`;
+const GUARD_CONFIG = new RegExp(String.raw`(^|[\s/\\'"=<>(|;&])` + GUARD_PATH);
 // Shell writes into those files: a redirect or tee aimed at one, or a command
-// that changes files. Plain reads (cat, grep, jq) stay allowed.
-const SHELL_WRITE =
-  /(>>?|\btee\s+(-a\s+)?)\s*["']?[^\s"']*\.claude[\\/](hooks[\\/]|agents[\\/]|settings)|\b(mv|cp|rm|sed\s+-i|perl\s+-\w*i|Set-Content|Out-File)\b/;
+// or interpreter call that changes files. Plain reads (cat, grep, jq) stay allowed.
+const SHELL_WRITE = new RegExp(
+  String.raw`(>>?|\btee\s+(-a\s+)?)\s*["']?[^\s"']*` + GUARD_PATH +
+    String.raw`|\b(mv|cp|rm|sed\s+-i|perl\s+-\w*i|Set-Content|Out-File|Bun\.write|(write|append)File(Sync)?)\b`,
+);
 const GUARD_CONFIG_REASON =
-  "Hooks, agents and Claude settings are guard config: the user edits them by hand. Describe the change and ask the user to make it.";
+  "Hooks, agents, Claude settings and bunfig.toml are guard config: the user edits them by hand. Describe the change and ask the user to make it.";
 
 function currentBranch(cwd?: string) {
   const result = Bun.spawnSync(["git", "branch", "--show-current"], { cwd });
   return result.stdout.toString().trim();
 }
 
-// A bare `git push` goes to the current branch's upstream.
+// Checks every `git ... push` in the command, so chaining (`;`, `&&`, `|`) and
+// git global options (`git -C . push`) don't hide a push to main.
 function pushesToProtectedBranch(command: string, branch: () => string) {
-  const push = command.slice(command.search(GIT_PUSH));
-  if (PROTECTED_BRANCH.test(push)) return true;
-  const args = push.split(/[;&|]/)[0]!.trim().split(/\s+/).slice(2);
-  const refspecs = args.filter((arg) => !arg.startsWith("-"));
-  return refspecs.length <= 1 && ["main", "master"].includes(branch());
+  return command.split(/[;&|]+/).some((segment) => {
+    const tokens = segment.trim().split(/\s+/);
+    const git = tokens.indexOf("git");
+    const push = tokens.indexOf("push", git + 1);
+    if (git === -1 || push === -1) return false;
+
+    const flags = tokens.slice(push + 1).filter((arg) => arg.startsWith("-"));
+    if (flags.some((flag) => ["--all", "--mirror"].includes(flag))) return true;
+
+    // First positional is the remote; the rest are refspecs.
+    const refspecs = tokens.slice(push + 1).filter((arg) => !arg.startsWith("-")).slice(1);
+    // No refspec pushes the current branch.
+    if (refspecs.length === 0) return PROTECTED_BRANCHES.includes(branch());
+
+    return refspecs.some((refspec) => {
+      const target = refspec.split(":").at(-1)!.replace(/^\+/, "").replace(/^refs\/heads\//, "");
+      const resolved = target === "HEAD" || target === "@" ? branch() : target;
+      return PROTECTED_BRANCHES.includes(resolved);
+    });
+  });
 }
 
 export function checkToolCall(
@@ -53,7 +73,8 @@ export function checkToolCall(
   env: Env,
   branch: () => string = () => currentBranch(),
 ): string | null {
-  const approved = Boolean(env.RELEASE_APPROVAL);
+  // Only an explicit yes opens the gates: RELEASE_APPROVAL=0 must not.
+  const approved = /^(1|true|yes)$/i.test(env.RELEASE_APPROVAL ?? "");
   const input = call.tool_input ?? {};
 
   if (call.tool_name === "Bash" && typeof input.command === "string") {
@@ -62,17 +83,14 @@ export function checkToolCall(
     if (SECRET_FILE.test(command)) {
       return "Commands that touch .env, *.pem or id_rsa files are not allowed. Use .env.example for variable names.";
     }
-    if (
-      GUARD_CONFIG.test(command.replaceAll("\\", "/")) &&
-      SHELL_WRITE.test(command)
-    ) {
+    if (GUARD_CONFIG.test(command) && SHELL_WRITE.test(command)) {
       return GUARD_CONFIG_REASON;
     }
     if (approved) return null;
     if (MIGRATION.test(command)) {
       return "DB migrations need human approval. Ask the user to run it, or to restart the session with RELEASE_APPROVAL=1.";
     }
-    if (GIT_PUSH.test(command) && pushesToProtectedBranch(command, branch)) {
+    if (pushesToProtectedBranch(command, branch)) {
       return "Pushing to main needs human approval. Push a feature branch and open a PR instead.";
     }
     if (PROD_DEPLOY.test(command)) {
@@ -88,7 +106,7 @@ export function checkToolCall(
     if (SECRET_FILE.test(` ${path}`)) {
       return "Editing secret files is not allowed.";
     }
-    if (GUARD_CONFIG.test(path.replaceAll("\\", "/"))) {
+    if (GUARD_CONFIG.test(` ${path}`)) {
       return GUARD_CONFIG_REASON;
     }
     // Bug-fix mode: the failing test is the spec, so fix the code instead.

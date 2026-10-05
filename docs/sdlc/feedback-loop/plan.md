@@ -20,9 +20,13 @@ Branch: `869f1am8w-ai-native-sdlc`, stacked on `869f84gvg-client-side-tools` (PR
   `shared` has no `scripts` block yet, so add one.
 - New `packages/shared/src/schemas.test.ts`, using `bun:test`, against
   `packages/shared/src/schemas.ts`:
-  - `messagePartSchema` accepts `text`, `reasoning` and `tool-call` parts;
-  - it rejects an unknown `type`;
-  - the `MAX_MESSAGE_LENGTH` boundary.
+  - `modeSchema` accepts the known modes and rejects others;
+  - tool input defaults, `readFile` ranges and the bash timeout cap;
+  - PLAN mode offers only read-only tools.
+
+  This was revised during build: `messagePartSchema` and the
+  `MAX_MESSAGE_LENGTH` boundary from the first draft don't exist on this
+  branch (see spec R2).
 - New `packages/cli/src/lib/local-tools.test.ts` (optional), against
   `executeLocalTool` in `packages/cli/src/lib/local-tools.ts`.
   - Run it in a temp dir: `process.chdir(mkdtemp)`, restored in `afterAll`.

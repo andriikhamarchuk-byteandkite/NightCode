@@ -21,9 +21,12 @@ These were checked on the branch before writing the spec.
 - **R1.** The root `bun run typecheck` checks `cli`, `server`, `shared` and
   `database`. It exits non-zero if any package fails.
 - **R2.** The root `bun test` runs the Bun test runner across the workspace. The
-  first suite covers `packages/shared/src/schemas.ts`: valid and invalid message
-  parts and the `MAX_MESSAGE_LENGTH` limit. An optional second suite covers
-  `executeLocalTool` path and secret guards in `packages/cli/src/lib/local-tools.ts`.
+  first suite covers the contract in `packages/shared/src/schemas.ts`: modes,
+  tool input validation (defaults, ranges, the bash timeout cap) and the
+  read-only tool set in PLAN mode. A second suite covers the `executeLocalTool`
+  path and secret guards in `packages/cli/src/lib/local-tools.ts`.
+  _Revised during build: the branch no longer has the `messagePartSchema` that
+  the first draft named, so the suite tests the contract that exists._
 - **R3.** Both commands are fast enough to run before every "done" (under about
   a minute on a clean tree), and they need no network, DB or `.env`.
 
@@ -73,8 +76,13 @@ These were checked on the branch before writing the spec.
 ### Maintain stage
 
 - **R15.** `scripts/ci-metrics.ts` reads recent runs through `gh run list` and
-  reports the CI failure rate against a threshold. When the threshold is
-  breached, it writes a draft `docs/sdlc/<date>-ci-failures/intent.md`.
+  reports the CI failure rate against a band, in tiers:
+  - below the band: log only;
+  - between 1× and 2× the band: list the failing runs for a human to
+    diagnose;
+  - at 2× or more: write a draft `docs/sdlc/<date>-ci-failures/intent.md`.
+
+  It needs at least 5 completed runs before judging.
 
 ## Design
 

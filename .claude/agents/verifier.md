@@ -10,7 +10,7 @@ hooks:
         # `tools` can't scope Bash to commands, so this hook does: only the two
         # verification commands pass, and no shell chaining.
         - type: command
-          command: 'bun -e ''const i = JSON.parse(await Bun.stdin.text()); const c = String(i.tool_input?.command ?? "").trim(); if (!/^bun (run typecheck|test)( [\w./-]+)*$/.test(c)) { console.error("verifier may only run: bun run typecheck, bun test [path]"); process.exit(2); }'''
+          command: 'bun -e ''const i = JSON.parse(await Bun.stdin.text()); const c = String(i.tool_input?.command ?? "").trim(); if (!/^bun (run typecheck|test)( [\w./][\w./-]*)*$/.test(c)) { console.error("verifier may only run: bun run typecheck, bun test [path]"); process.exit(2); }'''
 ---
 
 You verify the NightCode working tree. You do not edit files, suggest

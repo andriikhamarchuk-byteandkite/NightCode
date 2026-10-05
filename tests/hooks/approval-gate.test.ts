@@ -71,6 +71,48 @@ describe("Bash gate", () => {
     ).toContain("guard config");
   });
 
+  // Bypasses found in the PR #13 review.
+  test.each([
+    ["git push origin main;", "feature"],
+    ["git push origin main&&echo ok", "feature"],
+    ["git push origin feat:refs/heads/main", "feature"],
+    ["git push origin +HEAD:main", "feature"],
+    ["git -C . push origin main", "feature"],
+    ["git push origin HEAD", "main"],
+    ["git push --all origin", "feature"],
+  ])("blocks push to main: %p on %p", (command, current) => {
+    const branch = current === "main" ? onBranch("main") : feature;
+    expect(checkToolCall(bash(command), {}, branch)).toContain("human approval");
+  });
+
+  test.each([
+    "git push origin HEAD",
+    "git push origin feature:feature",
+    "git push -u origin 869f1am8w-ai-native-sdlc && gh pr view",
+  ])("still allows feature pushes: %p", (command) => {
+    expect(checkToolCall(bash(command), {}, feature)).toBeNull();
+  });
+
+  test("blocks secret files matched by a glob", () => {
+    expect(checkToolCall(bash("cat .env*"), {}, feature)).toContain("not allowed");
+    expect(checkToolCall(bash("cat .env.exampl?"), {}, feature)).not.toBeNull();
+  });
+
+  test.each([
+    `echo '[test]' > bunfig.toml`,
+    "echo 'preload = [\"./x.ts\"]' >> .bunfig.toml",
+    `bun -e "await Bun.write('.claude/settings.json','{}')"`,
+    `node -e "require('fs').writeFileSync('.claude/hooks/approval-gate.ts','')"`,
+  ])("always blocks writes to guard config: %p", (command) => {
+    expect(checkToolCall(bash(command), { RELEASE_APPROVAL: "1" }, feature)).toContain("guard config");
+  });
+
+  test.each(["0", "false", "no", ""])("RELEASE_APPROVAL=%p does not approve", (value) => {
+    expect(
+      checkToolCall(bash("bunx prisma migrate deploy"), { RELEASE_APPROVAL: value }, feature),
+    ).not.toBeNull();
+  });
+
   test("allows a gated command once a human sets RELEASE_APPROVAL", () => {
     expect(
       checkToolCall(bash("bunx prisma migrate deploy"), { RELEASE_APPROVAL: "1" }, feature),
@@ -96,6 +138,11 @@ describe("Edit/Write gate", () => {
     ".claude/agents/verifier.md",
   ])("always blocks guard config %p", (path) => {
     expect(checkToolCall(edit(path), { RELEASE_APPROVAL: "1" })).toContain("guard config");
+  });
+
+  test("always blocks bunfig.toml, which can preload code before the hook", () => {
+    expect(checkToolCall(edit("D:\\repo\\bunfig.toml"), {})).toContain("guard config");
+    expect(checkToolCall(edit("bunfig.toml"), {})).toContain("guard config");
   });
 
   test("allows skills and other .claude files", () => {
