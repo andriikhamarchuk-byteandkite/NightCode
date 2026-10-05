@@ -10,6 +10,8 @@
     "dev:server": "bun run --hot packages/server/src/index.ts",
     "start": "bun run packages/server/src/index.ts",
     "link:cli": "cd packages/cli && bun link",
-    "postinstall": "bun run --cwd packages/database db:generate"
+    "postinstall": "bun run --cwd packages/database db:generate",
+    "typecheck": "bun run --cwd packages/cli typecheck && bun run --cwd packages/server typecheck && bun run --cwd packages/shared typecheck && bun run --cwd packages/database typecheck",
+    "test": "bun test"
   }
 }

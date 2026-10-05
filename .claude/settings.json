@@ -5,6 +5,8 @@
       "Bash(bun install)",
       "Bash(bun run dev:cli)",
       "Bash(bun run --cwd packages/cli typecheck)",
+      "Bash(bun run typecheck)",
+      "Bash(bun test)",
       "Bash(git status)",
       "Bash(git diff:*)",
       "Bash(git log:*)"
