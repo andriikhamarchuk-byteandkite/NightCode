@@ -115,3 +115,6 @@ export type ToolContracts = typeof buildToolContracts;
 export function getToolContracts(mode: ModeType) {
   return mode === Mode.PLAN ? readOnlyToolContracts : buildToolContracts;
 }
+
+// TEMP: deliberate type error for the red-CI demo; reverted in the next commit.
+export const ciDemoBroken: number = "not a number";
