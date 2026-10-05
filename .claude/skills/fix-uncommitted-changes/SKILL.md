@@ -1,7 +1,7 @@
 ---
 name: fix-uncommitted-changes
 description: Use after review-uncommitted-changes has reported findings in this conversation and the user wants them fixed.
-allowed-tools: Bash(git status), Bash(git diff:*), Bash(bun run --cwd packages/cli typecheck), Bash(bun run dev:cli)
+allowed-tools: Bash(git status), Bash(git diff:*), Bash(bun run typecheck), Bash(bun test), Bash(bun run dev:cli)
 ---
 
 # Fix uncommitted changes
@@ -16,8 +16,8 @@ Apply the fixes for the numbered findings from the latest `review-uncommitted-ch
    - Fix a `nit` only if the user asked or it is a one-line change.
    - Skip a finding the user rejected, or one that turns out wrong after reading the code, and say why.
    - If a fix has more than one reasonable approach with different trade-offs, ask the user before choosing.
-3. **Edit.** Smallest correct change, only in files that are already part of the uncommitted work (or directly required by the fix), matching the surrounding style. Never add `any`, `@ts-ignore` or loosen `tsconfig` to make a check pass.
-4. **Verify.** `git diff HEAD --stat`, then `bun run --cwd packages/cli typecheck` and a brief `bun run dev:cli` smoke run.
+3. **Edit.** Smallest correct change, only in files that are already part of the uncommitted work (or directly required by the fix), matching the surrounding style. Never add `any`, `@ts-ignore` or loosen `tsconfig` to make a check pass. If a test fails, fix the code, not the test.
+4. **Verify.** `git diff HEAD --stat`, then `bun run typecheck`, `bun test` and, for UI changes, a brief `bun run dev:cli` smoke run.
 
 ## Output
 
@@ -29,8 +29,9 @@ Apply the fixes for the numbered findings from the latest `review-uncommitted-ch
 3. needs decision — <question for the user>
 
 ### Checks
-- `bun run --cwd packages/cli typecheck`: pass/fail
-- `bun run dev:cli`: starts/fails
+- `bun run typecheck`: pass/fail
+- `bun test`: N pass / N fail
+- `bun run dev:cli`: starts/fails/not run (why)
 
 ### Proposed commit
 `<type>: <summary>`

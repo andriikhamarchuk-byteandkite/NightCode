@@ -20,7 +20,8 @@
 
 ## Verification
 
-- [ ] `bun run --cwd packages/cli typecheck` passes
+- [ ] `bun run typecheck` passes
+- [ ] `bun test` passes
 - [ ] `bun run dev:cli` starts without errors
 
 <!-- List any other checks you actually ran. Tick only what you ran. -->
