@@ -1,0 +1,59 @@
+name: Claude review
+
+# An informational review pass guided by REVIEW.md. It only comments: merging
+# stays with the human reviewer.
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      # Fork PRs and repos without the secret skip instead of failing.
+      - name: Skip without API key
+        if: env.HAS_KEY != 'true'
+        run: echo "::notice::ANTHROPIC_API_KEY is not set, AI review skipped."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_KEY == 'true'
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        if: env.HAS_KEY == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+            BASE: ${{ github.event.pull_request.base.ref }}
+
+            Review this pull request. The PR branch is checked out in the
+            current directory. Read CLAUDE.md and REVIEW.md first, and follow
+            REVIEW.md exactly: its passes, its Important/Nit rules, its nit cap,
+            its "Do not report" list and its output format.
+
+            Review only the PR diff (`gh pr diff`). If the PR adds
+            docs/sdlc/<change>/spec.md or plan.md, check the code against them
+            in the Compliance pass.
+
+            Post each Important finding with
+            `mcp__github_inline_comment__create_inline_comment` (confirmed: true),
+            then one summary with `gh pr comment`. Only post GitHub comments.
+            Never approve or request changes.
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"

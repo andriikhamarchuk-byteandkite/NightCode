@@ -19,7 +19,7 @@ Project facts (see `README.md`):
 1. **Collect.** `git status --short` and `git diff HEAD --stat` (covers staged and unstaged). Read untracked files in full. If nothing changed, say so and stop.
 2. **Read.** `git diff HEAD -- <path>` per file. Open surrounding code only when a hunk cannot be judged alone.
 3. **Check.** Run `bun run typecheck` and `bun test`. If `packages/cli/src` changed, run `bun run dev:cli` briefly to confirm it starts, then stop it.
-4. **Review** only the changed lines against:
+4. **Review** only the changed lines. Apply `REVIEW.md` (the same rules the CI review uses): its Bugs / Security / Compliance passes, what counts as Important, and its "Do not report" list. Then also check:
    - **Correctness:** does what it intends, edge cases (empty input, missing values), error handling, no logic errors. Check the "Things Claude gets wrong" list in `CLAUDE.md`.
    - **Tests:** a bug fix or new logic in `shared`, `server/src/lib` or `cli/src/lib` comes with a test; existing tests were not weakened to pass.
    - **React / OpenTUI:** rules of hooks, effect cleanup (listeners, timers), stable `key` props, OpenTUI props and hooks exist in the installed version.
