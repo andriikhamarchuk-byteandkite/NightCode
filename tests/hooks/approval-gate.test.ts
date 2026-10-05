@@ -46,6 +46,31 @@ describe("Bash gate", () => {
     expect(checkToolCall(bash(command), {}, feature)).not.toBeNull();
   });
 
+  test.each([
+    `echo '{"env":{"RELEASE_APPROVAL":"1"}}' > .claude/settings.local.json`,
+    "sed -i 's/exit(2)/exit(0)/' .claude/hooks/approval-gate.ts",
+    "rm .claude/agents/verifier.md",
+    "cp /tmp/x.json .claude\\settings.json",
+  ])("always blocks shell writes to guard config: %p", (command) => {
+    expect(checkToolCall(bash(command), { RELEASE_APPROVAL: "1" }, feature)).toContain("guard config");
+  });
+
+  test.each([
+    "cat .claude/settings.json",
+    "jq .hooks .claude/settings.json",
+    // A redirect elsewhere in the command is not a write into guard config.
+    "sed -n 28,29p .claude/hooks/approval-gate.ts && bun test >/dev/null",
+    "grep hooks .claude/settings.json 2>&1",
+  ])("allows reading guard config: %p", (command) => {
+    expect(checkToolCall(bash(command), {}, feature)).toBeNull();
+  });
+
+  test("blocks appending to guard config with tee", () => {
+    expect(
+      checkToolCall(bash("echo x | tee -a .claude/settings.local.json"), {}, feature),
+    ).toContain("guard config");
+  });
+
   test("allows a gated command once a human sets RELEASE_APPROVAL", () => {
     expect(
       checkToolCall(bash("bunx prisma migrate deploy"), { RELEASE_APPROVAL: "1" }, feature),
@@ -62,6 +87,19 @@ describe("Edit/Write gate", () => {
   test("always blocks secret files", () => {
     expect(checkToolCall(edit("D:/repo/.env"), {})).not.toBeNull();
     expect(checkToolCall(edit("D:/repo/.env.example"), {})).toBeNull();
+  });
+
+  test.each([
+    ".claude/hooks/approval-gate.ts",
+    "D:\\repo\\.claude\\settings.local.json",
+    "/home/u/repo/.claude/settings.json",
+    ".claude/agents/verifier.md",
+  ])("always blocks guard config %p", (path) => {
+    expect(checkToolCall(edit(path), { RELEASE_APPROVAL: "1" })).toContain("guard config");
+  });
+
+  test("allows skills and other .claude files", () => {
+    expect(checkToolCall(edit(".claude/skills/create-pr/SKILL.md"), {})).toBeNull();
   });
 
   test("protects test files only in PROTECT_TESTS mode", () => {
