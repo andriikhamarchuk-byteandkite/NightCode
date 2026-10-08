@@ -1,37 +1,23 @@
-import { Mode } from "@nightcode/database/enums";
-import type {
-  ClientMessagePart,
-  ClientToolCallPart,
-} from "../../hooks/use-chat";
+import type { Message } from "../../hooks/use-chat";
 import { useTheme } from "../../providers/theme";
 import { TextAttributes } from "@opentui/core";
-
-function formatToolName(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/^./, (c) => c.toUpperCase());
-}
+import { Mode, type ModeType } from "@nightcode/shared";
+import prettyMs from "pretty-ms";
 
 const SUMMARY_ARG_NAMES = ["command", "pattern", "path"];
 const MAX_ARGS_LENGTH = 80;
 
-// Show only the arg that tells what the tool is doing (not e.g. the full
-// file content of writeFile), on one short line.
-function formatToolArgs(tc: ClientToolCallPart): string {
-  const name = SUMMARY_ARG_NAMES.find((n) => typeof tc.args[n] === "string");
-  const value = name ? String(tc.args[name]) : "";
-  const oneLine = value.replace(/\s+/g, " ").trim();
-
-  return oneLine.length > MAX_ARGS_LENGTH
-    ? `${oneLine.slice(0, MAX_ARGS_LENGTH)}…`
-    : oneLine;
-}
+type ClientMessagePart = Message["parts"][number];
+type ToolPart = Extract<
+  ClientMessagePart,
+  { type: `tool-${string}` | "dynamic-tool" }
+>;
 
 type Props = {
   parts: ClientMessagePart[];
   model: string;
-  mode: Mode;
-  duration?: string;
+  mode: ModeType;
+  durationMs?: number;
   streaming?: boolean;
   interrupted?: boolean;
 };
@@ -41,6 +27,61 @@ type PartGroup = {
   parts: ClientMessagePart[];
   key: string;
 };
+
+function formatToolName(name: string): string {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+function isToolPart(part: ClientMessagePart): part is ToolPart {
+  return part.type === "dynamic-tool" || part.type.startsWith("tool-");
+}
+
+// Show only the arg that tells what the tool is doing (not e.g. the full
+// file content of writeFile), on one short line.
+function formatToolArgs(tc: ToolPart): string {
+  if (!("input" in tc) || tc.input == null || typeof tc.input !== "object") {
+    return "";
+  }
+
+  const input = tc.input as Record<string, unknown>;
+  const name = SUMMARY_ARG_NAMES.find((n) => typeof input[n] === "string");
+  const value = name ? String(input[name]) : "";
+  const oneLine = value.replace(/\s+/g, " ").trim();
+
+  return oneLine.length > MAX_ARGS_LENGTH
+    ? `${oneLine.slice(0, MAX_ARGS_LENGTH)}…`
+    : oneLine;
+}
+
+// bash reports a failed command as a normal result with a non-zero exit
+// code, so its error is in the output, not in errorText.
+function formatToolResult(tc: ToolPart): string {
+  if (tc.state === "output-error") return ` ${tc.errorText}`;
+  if (tc.state !== "output-available") return " …";
+
+  const output = tc.output;
+  if (
+    output == null ||
+    typeof output !== "object" ||
+    !("exitCode" in output) ||
+    output.exitCode === 0
+  ) {
+    return "";
+  }
+
+  const stderr =
+    "stderr" in output && typeof output.stderr === "string"
+      ? (output.stderr.trim().split("\n")[0] ?? "")
+      : "";
+  const firstLine =
+    stderr.length > MAX_ARGS_LENGTH
+      ? `${stderr.slice(0, MAX_ARGS_LENGTH)}…`
+      : stderr;
+
+  return ` exit ${String(output.exitCode)}${firstLine ? `: ${firstLine}` : ""}`;
+}
 
 function groupConsecutiveParts(parts: ClientMessagePart[]): PartGroup[] {
   const groups: PartGroup[] = [];
@@ -52,10 +93,9 @@ function groupConsecutiveParts(parts: ClientMessagePart[]): PartGroup[] {
     if (lastGroup && lastGroup.type === part.type) {
       lastGroup.parts.push(part);
     } else {
-      const key =
-        part.type === "tool-call"
-          ? `group-tc-${part.id}`
-          : `group-${part.type}-${i}`;
+      const key = isToolPart(part)
+        ? `group-tc-${part.toolCallId}`
+        : `group-${part.type}-${i}`;
       groups.push({ type: part.type, parts: [part], key });
     }
   }
@@ -67,7 +107,7 @@ export function BotMessage({
   parts,
   model,
   mode,
-  duration,
+  durationMs,
   streaming = false,
   interrupted = false,
 }: Props) {
@@ -75,8 +115,8 @@ export function BotMessage({
 
   return (
     <box width="100%" alignItems="center">
-      {groupConsecutiveParts(parts).map((group) => (
-        <box key={group.key} paddingY={1} width="100%">
+      {groupConsecutiveParts(parts).map((group, i) => (
+        <box key={group.key} width="100%" paddingTop={i === 0 ? 0 : 1}>
           {group.parts.map((part, j) => {
             if (part.type === "reasoning") {
               return (
@@ -93,19 +133,23 @@ export function BotMessage({
                 </box>
               );
             }
-            if (part.type === "tool-call") {
+            if (isToolPart(part)) {
+              const toolName =
+                part.type === "dynamic-tool"
+                  ? part.toolName
+                  : part.type.slice("tool-".length);
               return (
                 <box
-                  key={part.id}
+                  key={part.toolCallId}
                   border={["left"]}
                   borderColor={colors.thinkingBorder}
                   width="100%"
                   paddingX={2}
                 >
                   <text attributes={TextAttributes.DIM}>
-                    <em fg={colors.info}>{formatToolName(part.name)}:</em>{" "}
+                    <em fg={colors.info}>{formatToolName(toolName)}:</em>{" "}
                     {formatToolArgs(part)}
-                    {part.status === "calling" ? " …" : ""}
+                    {formatToolResult(part)}
                   </text>
                 </box>
               );
@@ -121,21 +165,21 @@ export function BotMessage({
           })}
         </box>
       ))}
-      <box paddingX={3} paddingBottom={1} gap={1} width="100%">
+      <box paddingX={3} paddingY={1} gap={1} width="100%">
         <box flexDirection="row" gap={2}>
-          <text
-            attributes={interrupted ? TextAttributes.DIM : 0}
-            fg={
-              interrupted
-                ? undefined
-                : mode === Mode.PLAN
-                  ? colors.planMode
-                  : colors.primary
-            }
-          >
-            ◉
-          </text>
           <box flexDirection="row" gap={1}>
+            <text
+              attributes={interrupted ? TextAttributes.DIM : 0}
+              fg={
+                interrupted
+                  ? undefined
+                  : mode === Mode.PLAN
+                    ? colors.planMode
+                    : colors.primary
+              }
+            >
+              ◉
+            </text>
             <text attributes={interrupted ? TextAttributes.DIM : 0}>
               {mode === Mode.PLAN ? "Plan" : "Build"}
             </text>
@@ -143,13 +187,15 @@ export function BotMessage({
               ›
             </text>
             <text attributes={TextAttributes.DIM}>{model}</text>
-            {(duration || interrupted) && (
+            {(durationMs != null || interrupted) && (
               <>
                 <text attributes={TextAttributes.DIM} fg={colors.dimSeparator}>
                   ›
                 </text>
                 <text attributes={TextAttributes.DIM}>
-                  {interrupted ? "interrupted" : duration}
+                  {interrupted || durationMs == null
+                    ? "interrupted"
+                    : prettyMs(durationMs)}
                 </text>
               </>
             )}

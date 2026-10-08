@@ -3,6 +3,9 @@
   "module": "src/index.tsx",
   "type": "module",
   "private": true,
+  "bin": {
+    "nightcode": "./bin/nightcode"
+  },
   "scripts": {
     "dev": "bun run --watch src/index.tsx",
     "typecheck": "tsc --noEmit"
@@ -14,12 +17,13 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@nightcode/database": "workspace:*",
+    "@ai-sdk/react": "^4.0.130",
     "@nightcode/shared": "workspace:*",
     "@opentui/core": "^0.5.12",
     "@opentui/react": "^0.5.12",
+    "ai": "^7.0.127",
     "date-fns": "^4.4.0",
-    "eventsource-parser": "^4.1.1",
+    "dotenv": "^18.0.4",
     "hono": "^4.13.11",
     "open": "^11.0.4",
     "opentui-spinner": "^0.0.7",

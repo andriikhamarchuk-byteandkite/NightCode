@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core";
 import type { ReactNode } from "react";
-import type { Mode } from "@nightcode/database/enums";
+import type { ModeType } from "@nightcode/shared";
 import { InputBar } from "./input-bar";
 import { Spinner } from "./spinner";
 import { usePromptConfig } from "../providers/prompt-config";
@@ -12,7 +12,7 @@ type Props = {
   loading?: boolean;
   interruptible?: boolean;
   // Mode of the in-flight request; falls back to the selected mode.
-  loadingMode?: Mode;
+  loadingMode?: ModeType;
 };
 
 export function SessionShell({
@@ -35,7 +35,7 @@ export function SessionShell({
       gap={1}
     >
       <scrollbox flexGrow={1} width="100%" stickyScroll stickyStart="bottom">
-        <box gap={1}>{children}</box>
+        <box>{children}</box>
       </scrollbox>
       <box flexShrink={0}>
         <InputBar onSubmit={onSubmit} disabled={inputDisabled} />

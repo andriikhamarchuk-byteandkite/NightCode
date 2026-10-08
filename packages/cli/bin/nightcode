@@ -1,0 +1,23 @@
+#!/usr/bin/env bun
+import dotenv from "dotenv";
+import { readFileSync } from "fs";
+import path from "path";
+
+// The CLI settings live in the repo's .env, so it is read by path: the
+// command runs inside any project. That file also holds the server secrets,
+// so only the keys the CLI needs are copied into this process.
+const CLI_ENV_KEYS = ["API_URL", "CLERK_FRONTEND_API", "CLERK_OAUTH_CLIENT_ID"];
+
+const envPath = path.resolve(import.meta.dirname, "../../../.env");
+
+try {
+  const parsed = dotenv.parse(readFileSync(envPath));
+  for (const key of CLI_ENV_KEYS) {
+    if (parsed[key] && !process.env[key]) process.env[key] = parsed[key];
+  }
+} catch {
+  // No .env: the CLI falls back to its defaults and env from the shell.
+}
+
+// Imported dynamically so the env is set before any CLI module reads it.
+await import("../src/index.tsx");
