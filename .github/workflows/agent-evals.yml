@@ -1,0 +1,53 @@
+name: Agent evals
+
+# Changes to the agent's instructions are checked against real tasks, the
+# same way code changes are checked against tests.
+on:
+  pull_request:
+    paths: ["CLAUDE.md", ".claude/**", "evals/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      # Fork PRs and repos without the secret skip instead of failing.
+      - name: Skip without API key
+        if: env.HAS_KEY != 'true'
+        run: echo "::notice::ANTHROPIC_API_KEY is not set, agent evals skipped."
+
+      - uses: actions/checkout@v4
+        if: env.HAS_KEY == 'true'
+
+      - uses: oven-sh/setup-bun@v2
+        if: env.HAS_KEY == 'true'
+        with:
+          bun-version: 1.4.2
+
+      - name: Install
+        if: env.HAS_KEY == 'true'
+        run: |
+          bun install --frozen-lockfile
+          bun install -g @anthropic-ai/claude-code
+        env:
+          DATABASE_URL: ""
+
+      - name: Run evals
+        if: env.HAS_KEY == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          passed=0; total=0
+          for eval in evals/*.json; do
+            total=$((total + 1))
+            if bash evals/check.sh "$eval"; then passed=$((passed + 1)); fi
+          done
+          echo "### Agent evals: $passed/$total passed" >> "$GITHUB_STEP_SUMMARY"
+          # Every eval must pass: the set is small and each one guards a rule.
+          [ "$passed" -eq "$total" ]

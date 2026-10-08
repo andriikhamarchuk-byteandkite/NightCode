@@ -8,10 +8,12 @@
   },
   "scripts": {
     "db:generate": "bunx prisma generate",
-    "db:migrate:deploy": "bunx prisma migrate deploy"
+    "db:migrate:deploy": "bunx prisma migrate deploy",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^26.6.3"
+    "@types/node": "^26.6.3",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

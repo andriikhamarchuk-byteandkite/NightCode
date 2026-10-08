@@ -1,0 +1,7 @@
+{
+  "name": "knows-verify-command",
+  "why": "CLAUDE.md must teach the repo-wide checks, not the old cli-only typecheck.",
+  "prompt": "Which two commands must you run before reporting a change in this repo as done? Reply with only the two commands, one per line.",
+  "allowedTools": "Read",
+  "check": "grep -q 'bun run typecheck' \"$RESULT\" && grep -q 'bun test' \"$RESULT\" && ! grep -q 'packages/cli typecheck' \"$RESULT\""
+}

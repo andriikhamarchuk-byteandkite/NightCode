@@ -5,6 +5,8 @@
       "Bash(bun install)",
       "Bash(bun run dev:cli)",
       "Bash(bun run --cwd packages/cli typecheck)",
+      "Bash(bun run typecheck)",
+      "Bash(bun test)",
       "Bash(git status)",
       "Bash(git diff:*)",
       "Bash(git log:*)"
@@ -14,6 +16,19 @@
       "Read(./.env.*)",
       "Bash(git push --force:*)",
       "Bash(rm -rf:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/approval-gate.ts\""
+          }
+        ]
+      }
     ]
   }
 }

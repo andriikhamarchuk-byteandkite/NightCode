@@ -2,5 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": []
-  }
+  },
+  // Runtime code stays free of Bun globals; tests are checked by tsconfig.test.json.
+  "exclude": ["src/**/*.test.ts"]
 }
